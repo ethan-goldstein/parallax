@@ -8,6 +8,9 @@
 # ────────────────────────────────────────────────────────────────────────────
 
 add_library(px_core STATIC
+  src/arena.cpp
+  src/store.cpp
+  src/symbols.cpp
   src/version.cpp)
 
 target_include_directories(px_core PUBLIC include)

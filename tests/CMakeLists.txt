@@ -31,9 +31,13 @@ target_include_directories(doctest SYSTEM INTERFACE "${doctest_header_SOURCE_DIR
 # target means `ctest` gives one clear pass/fail without per-file ceremony.
 add_executable(px_tests
   main.cpp
+  test_arena.cpp
+  test_store.cpp
+  test_symbols.cpp
   test_version.cpp)
 
 target_link_libraries(px_tests PRIVATE px_core doctest px_warnings)
+target_include_directories(px_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_test(NAME px_tests COMMAND px_tests)
 
