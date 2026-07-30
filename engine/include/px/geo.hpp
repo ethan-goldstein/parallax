@@ -214,6 +214,19 @@ class GeoIndex {
   /// resolution. `level` is how many low bits to mask off.
   [[nodiscard]] u32 cell_count(MortonKey key, u32 level) const noexcept;
 
+  /// Number of entries inside the Morton ranges covering `box`, WITHOUT
+  /// materialising them.
+  ///
+  /// This is the planner's spatial cardinality estimate, and it is exact at
+  /// cell granularity: the array is sorted, so it is two binary searches per
+  /// range. It over-counts by exactly the Z-order false positives — points
+  /// inside a key range but outside the box — which is a known, bounded
+  /// direction of error rather than a guess, and `ranges_out` reports how many
+  /// ranges the box decomposed into so the UI can show why a query was
+  /// expensive.
+  [[nodiscard]] u32 estimate_range_rows(const BBox& box,
+                                        u32* ranges_out = nullptr) const noexcept;
+
  private:
   /// Shared scan path for bbox and k-NN. Emits INDICES into entries_ rather
   /// than refs, so k-NN can read coordinates directly instead of rescanning

@@ -99,6 +99,40 @@ JsBufferRef query_points(int valid_at, u32 sys_at, u32 geo_attr, u32 scalar_attr
                      static_cast<u32>(sizeof(px::wire::Point)), b.generation, b.truncated};
 }
 
+// ── query language ─────────────────────────────────────────────────────────
+
+struct JsQueryResult {
+  JsBufferRef buffer;
+  bool ok = false;
+  std::string error;
+  u32 errorBegin = 0;
+  u32 errorEnd = 0;
+  /// EXPLAIN as a JSON string. Correct choice here precisely because the
+  /// record is small and human-readable — the same choice would be wrong for
+  /// the point buffer, which is why that travels as raw memory instead.
+  std::string explain;
+};
+
+void register_source(const std::string& name, u32 geo_attr, u32 scalar_attr) {
+  session().register_source(name, px::SymbolId{geo_attr}, px::SymbolId{scalar_attr});
+}
+
+JsQueryResult run_query(const std::string& sql, double now_unix) {
+  const px::Session::QueryOutcome r =
+      session().run_query(sql, static_cast<px::i64>(now_unix));
+
+  JsQueryResult out;
+  out.ok = r.ok;
+  out.error = r.error;
+  out.errorBegin = r.error_begin;
+  out.errorEnd = r.error_end;
+  out.explain = r.explain;
+  out.buffer = JsBufferRef{heap_addr(r.batch.data), r.batch.count,
+                           static_cast<u32>(sizeof(px::wire::Point)), r.batch.generation,
+                           r.batch.truncated};
+  return out;
+}
+
 JsScanStats last_scan() {
   const px::ScanStats& s = session().last_scan();
   return JsScanStats{s.chunks_total, s.chunks_skipped, s.rows_scanned, s.rows_matched,
@@ -161,6 +195,17 @@ EMSCRIPTEN_BINDINGS(parallax) {
   emscripten::function("stagingPtr", &staging_ptr);
   emscripten::function("ingest", &ingest);
   emscripten::function("queryPoints", &query_points);
+
+  emscripten::value_object<JsQueryResult>("QueryResult")
+      .field("buffer", &JsQueryResult::buffer)
+      .field("ok", &JsQueryResult::ok)
+      .field("error", &JsQueryResult::error)
+      .field("errorBegin", &JsQueryResult::errorBegin)
+      .field("errorEnd", &JsQueryResult::errorEnd)
+      .field("explain", &JsQueryResult::explain);
+
+  emscripten::function("registerSource", &register_source);
+  emscripten::function("runQuery", &run_query);
 
   emscripten::function("lastScan", &last_scan);
   emscripten::function("factCount", &fact_count);

@@ -35,6 +35,17 @@ export interface FactInput {
   writePayload: (view: DataView, offset: number) => void
 }
 
+export interface QueryResult {
+  buffer: BufferRef
+  ok: boolean
+  error: string
+  errorBegin: number
+  errorEnd: number
+  /** EXPLAIN record as JSON — small and human-readable, which is exactly when
+   *  JSON across the boundary is the right call. */
+  explain: string
+}
+
 export interface Transaction {
   id: number
   wallClockUnix: number
@@ -59,6 +70,8 @@ interface EngineExports {
   heapBytes(): number
   txnWallClock(i: number): number
   txnFactCount(i: number): number
+  registerSource(name: string, geoAttr: number, scalarAttr: number): void
+  runQuery(sql: string, nowUnix: number): QueryResult
 }
 
 export class Engine {
@@ -145,6 +158,26 @@ export class Engine {
 
   lastScan(): ScanStats {
     return this.#x.lastScan()
+  }
+
+  /**
+   * Binds a query-language source name to the attributes carrying its geometry
+   * and scalar. `earthquakes` and `vessels` are distinct sources precisely
+   * because they answer to different attributes.
+   */
+  registerSource(name: string, geoAttr: number, scalarAttr: number): void {
+    this.#x.registerSource(name, geoAttr, scalarAttr)
+  }
+
+  /**
+   * Parses, plans, executes, and packs a query for rendering.
+   *
+   * `nowUnix` is injected rather than read from a clock inside the engine, so
+   * relative times like `-6h` resolve against a caller-controlled instant and
+   * plans stay reproducible.
+   */
+  runQuery(sql: string, nowUnix = Math.floor(Date.now() / 1000)): QueryResult {
+    return this.#x.runQuery(sql, nowUnix)
   }
 
   /** Every transaction, for labelling the system-time axis. */

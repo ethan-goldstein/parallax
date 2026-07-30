@@ -11,6 +11,7 @@ import { Globe } from './render/globe'
 import { fetchVessels, buildVesselBatches } from './sources/digitraffic'
 import { licenseObligations, SOURCES } from './sources/registry'
 import { buildBatches, EntityRegistry, fetchQuakes, USGS_FEEDS, type Batch } from './sources/usgs'
+import { renderExplain, type ExplainPlan } from './ui/explain'
 import { Scrubber } from './ui/scrubber'
 
 const MAX_POINTS = 262_144
@@ -28,6 +29,15 @@ app.innerHTML = `
     </div>
     <div id="status" class="status hud-label">booting engine…</div>
   </header>
+
+  <div class="query-bar">
+    <input id="query" class="query-input" spellcheck="false" autocomplete="off"
+           placeholder="earthquakes where magnitude > 4.5   —   press Enter" />
+    <div id="query-error" class="query-error" hidden></div>
+    <div id="query-examples" class="query-examples"></div>
+  </div>
+
+  <section id="explain" class="explain"></section>
 
   <aside class="hud panel layers" id="layers"></aside>
   <aside id="readout" class="hud panel readout" aria-live="polite"></aside>
@@ -87,6 +97,14 @@ async function main(): Promise<void> {
     vesselPosition: engine.intern('vessel_position'),
     speed: engine.intern('speed'),
   }
+
+  // Bind query-language source names to the attributes that carry their
+  // geometry and scalar, so `earthquakes` and `vessels` mean different things
+  // to the planner.
+  engine.registerSource('earthquakes', attrs.position, attrs.magnitude)
+  engine.registerSource('quakes', attrs.position, attrs.magnitude)
+  engine.registerSource('vessels', attrs.vesselPosition, attrs.speed)
+  engine.registerSource('ships', attrs.vesselPosition, attrs.speed)
 
   const globe = new Globe({ container: stage, maxPoints: MAX_POINTS })
   // Amber → red for seismic energy; teal for maritime. Teal is the valid-time
@@ -232,7 +250,7 @@ async function main(): Promise<void> {
     },
   })
 
-  function refresh(): void {
+  let refresh = function (): void {
     let total = 0
     let scanned = 0
     let skipped = 0
@@ -301,7 +319,118 @@ async function main(): Promise<void> {
     else globe.start()
   })
 
-  Object.assign(window, { __parallax: { engine, globe, scrubber, refresh } })
+  // ── query bar ────────────────────────────────────────────────────────────
+  //
+  // A query REPLACES the layer rendering: when one is active the globe shows
+  // its result set and nothing else, because showing query results on top of
+  // an unfiltered background would make it impossible to tell which points the
+  // query actually selected.
+  const queryInput = document.querySelector<HTMLInputElement>('#query')!
+  const queryError = document.querySelector<HTMLDivElement>('#query-error')!
+  const explainHost = document.querySelector<HTMLElement>('#explain')!
+  const examplesHost = document.querySelector<HTMLDivElement>('#query-examples')!
+
+  const EXAMPLES = [
+    'earthquakes where magnitude > 4.5',
+    'earthquakes in bbox(30, 120, 50, 150)',
+    'vessels within 40km of (60.15, 24.95)',
+    'earthquakes where magnitude > 5 limit 20',
+  ]
+  examplesHost.innerHTML = EXAMPLES.map(
+    (e) => `<button class="query-example" type="button">${e}</button>`,
+  ).join('')
+  examplesHost.querySelectorAll<HTMLButtonElement>('.query-example').forEach((b, i) => {
+    b.addEventListener('click', () => {
+      queryInput.value = EXAMPLES[i]!
+      runQuery()
+    })
+  })
+
+  let queryActive = false
+
+  function clearQuery(): void {
+    queryActive = false
+    queryInput.classList.remove('invalid')
+    queryError.hidden = true
+    renderExplain(explainHost, null)
+    refresh()
+  }
+
+  function runQuery(): void {
+    const sql = queryInput.value.trim()
+    if (sql.length === 0) {
+      clearQuery()
+      return
+    }
+
+    const result = engine.runQuery(sql)
+
+    if (!result.ok) {
+      queryActive = false
+      queryInput.classList.add('invalid')
+      queryError.hidden = false
+
+      // The engine returns a byte span for the offending token, so point at it
+      // rather than saying "syntax error" and leaving the user to hunt.
+      const caret =
+        ' '.repeat(Math.max(0, result.errorBegin)) +
+        '^'.repeat(Math.max(1, result.errorEnd - result.errorBegin))
+      queryError.innerHTML =
+        `<div>${result.error}</div><div class="caret">${sql}</div><div class="caret">${caret}</div>`
+      renderExplain(explainHost, null)
+      return
+    }
+
+    queryActive = true
+    queryInput.classList.remove('invalid')
+    queryError.hidden = true
+
+    // The result set is a single layer; the other is emptied so what is on
+    // screen is exactly what the query returned.
+    globe.updateLayer('seismic', engine.heap.pointView(result.buffer), result.buffer.count)
+    globe.updateLayer('maritime', engine.heap.pointView(result.buffer), 0)
+
+    let plan: ExplainPlan | null = null
+    try {
+      plan = JSON.parse(result.explain) as ExplainPlan
+    } catch (err) {
+      console.error('[parallax] EXPLAIN was not valid JSON', err)
+    }
+    renderExplain(explainHost, plan)
+
+    const scan = engine.lastScan()
+    readoutEl.innerHTML = [
+      row('query rows', result.buffer.count.toLocaleString(), 'ok'),
+      row('facts', engine.factCount.toLocaleString()),
+      row('entities', registry.size.toLocaleString()),
+      row('plan', plan ? `${plan.rejected.length + 1} paths considered` : '—'),
+      row('engine', `${scan.queryMs.toFixed(3)} ms`),
+      row('store', `${(engine.heapBytes / 1024).toFixed(0)} KB`),
+      row('frame', `${globe.frameMs.toFixed(2)} ms`),
+      result.buffer.truncated ? row('truncated', 'buffer full', 'bad') : '',
+    ].join('')
+  }
+
+  queryInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      runQuery()
+    } else if (e.key === 'Escape') {
+      queryInput.value = ''
+      clearQuery()
+      queryInput.blur()
+    }
+  })
+
+  // Scrubbing while a query is active re-runs it, so the two time axes and the
+  // query language stay the same mechanism rather than competing ones.
+  const baseRefresh = refresh
+  refresh = function () {
+    if (queryActive) return
+    baseRefresh()
+  }
+
+  Object.assign(window, { __parallax: { engine, globe, scrubber, refresh, runQuery } })
 }
 
 void main()

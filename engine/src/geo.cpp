@@ -281,6 +281,29 @@ void GeoIndex::query_knn(f64 lat, f64 lon, u32 k, std::vector<u32>& out,
   if (stats) *stats = local;
 }
 
+u32 GeoIndex::estimate_range_rows(const BBox& box, u32* ranges_out) const noexcept {
+  if (!built_) {
+    if (ranges_out) *ranges_out = 0;
+    return 0;
+  }
+
+  const std::vector<KeyRange> ranges = decompose_bbox(box);
+  if (ranges_out) *ranges_out = static_cast<u32>(ranges.size());
+
+  u32 total = 0;
+  for (const KeyRange& r : ranges) {
+    // Two binary searches per range, no scanning. The count is exact for the
+    // key ranges; it over-counts the BOX by exactly the Z-order false
+    // positives, which is a bounded and known direction of error.
+    const auto begin = std::lower_bound(entries_.begin(), entries_.end(), r.lo,
+                                        [](const Entry& e, MortonKey k) { return e.key < k; });
+    const auto end = std::upper_bound(entries_.begin(), entries_.end(), r.hi,
+                                      [](MortonKey k, const Entry& e) { return k < e.key; });
+    total += static_cast<u32>(end - begin);
+  }
+  return total;
+}
+
 u32 GeoIndex::cell_count(MortonKey key, u32 level) const noexcept {
   if (!built_ || level >= 64) return 0;
 

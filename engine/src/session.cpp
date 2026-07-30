@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "px/bench.hpp"
+#include "px/ql/parser.hpp"
 
 namespace px {
 
@@ -86,8 +87,138 @@ IngestResult Session::ingest(u32 byte_offset, u32 byte_len, i64 wall_clock_unix)
 
   store_.commit_txn();
   store_.rebuild_entity_index();
+  rebuild_geo_index();
 
   return result;
+}
+
+void Session::rebuild_geo_index() {
+  geo_.clear();
+  geo_.reserve(store_.fact_count());
+
+  // Indexed by FactId, not by entity. The spatial index answers "where", and
+  // the bitemporal predicate answers "when" — keeping them separate means a
+  // geo query returns candidates that still have to pass visible_at(), rather
+  // than the index having to be rebuilt for every point on the time axes.
+  for (u32 i = 0; i < static_cast<u32>(store_.fact_count()); ++i) {
+    const FactId f{i};
+    const Value v = store_.fact_value(f);
+    if (v.kind != Kind::Geo) continue;
+    geo_.add(v.as_geo(), i);
+  }
+  geo_.build();
+}
+
+void Session::register_source(std::string_view name, SymbolId geo_attr,
+                              SymbolId scalar_attr) {
+  for (SourceBinding& b : sources_) {
+    if (b.name == name) {
+      b.geo_attr = geo_attr;
+      b.scalar_attr = scalar_attr;
+      return;
+    }
+  }
+  sources_.push_back(SourceBinding{std::string(name), geo_attr, scalar_attr});
+}
+
+Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
+  QueryOutcome out;
+  out.batch.generation = generation_;
+
+  ql::ParseResult pr = ql::parse(sql);
+  if (pr.error.failed) {
+    out.error = pr.error.message;
+    out.error_begin = pr.error.begin;
+    out.error_end = pr.error.end;
+    return out;
+  }
+
+  const SourceBinding* binding = nullptr;
+  for (const SourceBinding& b : sources_) {
+    if (b.name == pr.query.source) binding = &b;
+  }
+  if (binding == nullptr) {
+    std::string known;
+    for (const SourceBinding& b : sources_) {
+      if (!known.empty()) known += ", ";
+      known += b.name;
+    }
+    out.error = "unknown source `" + pr.query.source + "` — try: " + known;
+    out.error_begin = 0;
+    out.error_end = static_cast<u32>(pr.query.source.size());
+    return out;
+  }
+
+  ql::PlanContext ctx;
+  ctx.store = &store_;
+  ctx.geo = &geo_;
+  ctx.now_unix = now_unix;
+  ctx.geo_attr = binding->geo_attr;
+  ctx.scalar_attr = binding->scalar_attr;
+  ctx.current_txn = store_.current_txn().v;
+
+  ql::Plan plan = ql::plan_query(pr.query, ctx);
+  if (!plan.ok()) {
+    out.error = plan.error.empty() ? "could not plan this query" : plan.error;
+    return out;
+  }
+
+  scratch_.clear();
+  {
+    ScopedTimer timer(last_query_ms_);
+    ql::execute(plan, ctx, pr.query, scratch_);
+  }
+
+  // Pack the surviving geometry facts, resolving each entity's scalar through
+  // the same index pass used by query_points.
+  ++query_stamp_;
+  if (binding->scalar_attr.valid()) {
+    std::vector<FactId> attrs;
+    for (const FactId f : scratch_) {
+      const EntityId e = store_.fact_entity(f);
+      attrs.clear();
+      store_.as_of_entity(e, plan.valid_at, TxnId{plan.sys_at}, attrs);
+      for (const FactId a : attrs) {
+        if (store_.fact_attr(a) != binding->scalar_attr) continue;
+        const Value av = store_.fact_value(a);
+        f32 s = 0.0f;
+        if (av.kind == Kind::F64) s = static_cast<f32>(av.as_f64());
+        else if (av.kind == Kind::I64) s = static_cast<f32>(av.as_i64());
+        if (e.index() >= scalar_by_entity_.size()) {
+          scalar_by_entity_.resize(e.index() + 1, 0.0f);
+          scalar_stamp_.resize(e.index() + 1, 0u);
+        }
+        scalar_by_entity_[e.index()] = s;
+        scalar_stamp_[e.index()] = query_stamp_;
+        break;
+      }
+    }
+  }
+
+  u32 written = 0;
+  u32 truncated = 0;
+  for (const FactId f : scratch_) {
+    if (written >= point_capacity_) {
+      truncated = 1;
+      break;
+    }
+    const Value v = store_.fact_value(f);
+    if (v.kind != Kind::Geo) continue;
+
+    const GeoPoint g = v.as_geo();
+    const usize e = store_.fact_entity(f).index();
+    const f32 scalar =
+        (e < scalar_stamp_.size() && scalar_stamp_[e] == query_stamp_) ? scalar_by_entity_[e]
+                                                                      : 0.0f;
+    points_[written] =
+        wire::Point{static_cast<f32>(g.lat()), static_cast<f32>(g.lon()), scalar, f.v};
+    ++written;
+  }
+
+  out.batch = PointBatch{points_.data(), written, generation_, truncated};
+  out.explain = ql::explain_json(plan);
+  out.ok = true;
+  return out;
 }
 
 Session::PointBatch Session::query_points(Timestamp valid_at, u32 sys_at,

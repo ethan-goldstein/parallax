@@ -11,10 +11,13 @@
 // ────────────────────────────────────────────────────────────────────────────
 #pragma once
 
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "px/prelude.hpp"
+#include "px/geo.hpp"
+#include "px/ql/plan.hpp"
 #include "px/store.hpp"
 #include "px/wire.hpp"
 
@@ -94,6 +97,33 @@ class Session {
   PointBatch query_points(Timestamp valid_at, u32 sys_at, SymbolId geo_attr,
                           SymbolId scalar_attr);
 
+  // ── query language ───────────────────────────────────────────────────────
+
+  /// Binds a source name in the query language to the attributes that carry
+  /// its geometry and its scalar. `earthquakes` and `vessels` are different
+  /// sources precisely because they answer to different attributes.
+  void register_source(std::string_view name, SymbolId geo_attr, SymbolId scalar_attr);
+
+  struct QueryOutcome {
+    PointBatch batch;
+    bool ok = false;
+    /// Parse or plan failure, with the byte span so the UI can underline it.
+    std::string error;
+    u32 error_begin = 0;
+    u32 error_end = 0;
+    /// The EXPLAIN record as JSON. Small and human-readable, which is exactly
+    /// when JSON across the boundary is the right choice.
+    std::string explain;
+  };
+
+  /// Parses, plans, executes, and packs the result for rendering.
+  QueryOutcome run_query(std::string_view sql, i64 now_unix);
+
+  /// Rebuilds the spatial index over every geo-valued fact. Called after a
+  /// bulk ingest; queries fall back to a scan while it is stale, so a
+  /// forgotten rebuild is a performance bug rather than a wrong answer.
+  void rebuild_geo_index();
+
   [[nodiscard]] const ScanStats& last_scan() const noexcept { return last_scan_; }
   [[nodiscard]] f64 last_query_ms() const noexcept { return last_query_ms_; }
 
@@ -127,6 +157,15 @@ class Session {
   std::vector<f32> scalar_by_entity_;
   std::vector<u32> scalar_stamp_;
   u32 query_stamp_ = 0;
+
+  GeoIndex geo_;
+
+  struct SourceBinding {
+    std::string name;
+    SymbolId geo_attr;
+    SymbolId scalar_attr;
+  };
+  std::vector<SourceBinding> sources_;
 
   u32 generation_ = 1;
   ScanStats last_scan_{};

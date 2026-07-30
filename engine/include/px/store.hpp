@@ -139,6 +139,30 @@ class Store {
   /// would cost more than rebuilding for the batch sizes involved here.
   void rebuild_entity_index();
 
+  /// The visibility predicate for a single fact.
+  ///
+  /// Exposed so the spatial access path can reuse it: the Morton index yields
+  /// candidates by location and each one still has to pass the bitemporal
+  /// test. Having exactly one implementation of this predicate is what keeps
+  /// the two access paths from disagreeing about what is visible.
+  [[nodiscard]] bool visible_at(FactId f, Timestamp valid_at, TxnId sys_at) const noexcept;
+
+  /// How many chunks the zone maps can prove cannot match.
+  ///
+  /// Runs the same test as_of() will, once per chunk — one comparison per 8192
+  /// rows. Cheap enough to call at PLAN time, which is what makes the
+  /// ZoneMapScan cardinality estimate exact rather than modelled, and it means
+  /// the planner and the executor cannot drift apart.
+  [[nodiscard]] u32 count_skippable_chunks(Timestamp valid_at, u32 sys_at) const noexcept;
+
+  /// The last transaction committed at or before `wall_clock_unix`.
+  ///
+  /// The system axis is a transaction index, not a clock, so "as we believed
+  /// at 14:00" means the newest transaction that had happened by 14:00.
+  /// Transactions are appended in wall-clock order (main.ts sorts batches
+  /// before ingest precisely so this holds), so this is a binary search.
+  [[nodiscard]] u32 txn_at_or_before(i64 wall_clock_unix) const noexcept;
+
   // ── accessors ────────────────────────────────────────────────────────────
 
   [[nodiscard]] usize fact_count() const noexcept { return entity_.size(); }

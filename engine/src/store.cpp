@@ -185,6 +185,52 @@ void Store::as_of(Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
   if (stats) *stats = local;
 }
 
+bool Store::visible_at(FactId f, Timestamp valid_at, TxnId sys_at) const noexcept {
+  if (!f.valid() || f.index() >= entity_.size()) return false;
+  const usize i = f.index();
+  const u32 s = sys_at.v;
+
+  const int known_then =
+      static_cast<int>(sys_from_[i] <= s) & static_cast<int>(s < sys_to_[i]);
+  const int true_then = static_cast<int>(valid_from_[i] <= valid_at) &
+                        static_cast<int>(valid_at < valid_to_[i]);
+  return (known_then & true_then) != 0;
+}
+
+u32 Store::count_skippable_chunks(Timestamp valid_at, u32 sys_at) const noexcept {
+  const u32 row_limit = upper_row_for_txn(sys_at);
+  u32 skipped = 0;
+
+  for (u32 chunk = 0; chunk < chunks_.size(); ++chunk) {
+    const u32 begin = chunk << kChunkShift;
+    if (begin >= row_limit) {
+      // Beyond the system-time cutoff: unreachable, which is a skip of a
+      // different kind but a skip nonetheless — the scan will not touch it.
+      ++skipped;
+      continue;
+    }
+    if (!chunk_can_match(chunks_[chunk], valid_at, sys_at)) ++skipped;
+  }
+  return skipped;
+}
+
+u32 Store::txn_at_or_before(i64 wall_clock_unix) const noexcept {
+  if (txns_.empty()) return 0;
+
+  // Transactions are appended in ascending wall-clock order — the ingest layer
+  // sorts batches before committing precisely so this invariant holds — so a
+  // binary search is valid. If it were ever violated the result would be
+  // wrong rather than crashing, which is why the ordering is enforced at the
+  // one place batches are built.
+  usize lo = 0, hi = txns_.size();
+  while (lo < hi) {
+    const usize mid = lo + (hi - lo) / 2;
+    if (txns_[mid].wall_clock_unix <= wall_clock_unix) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo == 0 ? 0 : static_cast<u32>(lo - 1);
+}
+
 void Store::rebuild_entity_index() {
   const usize n = entity_.size();
   entity_offset_.clear();
