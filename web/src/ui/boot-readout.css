@@ -1,0 +1,71 @@
+/* ── boot readout ────────────────────────────────────────────────────────────
+   The Phase 1 diagnostic plate. Replaced by the globe in Phase 3, but the
+   idiom established here — hairline rules, uppercase mono micro-labels on the
+   left, tabular figures right-aligned on the right — is the one every panel in
+   the application reuses.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.plate {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  gap: var(--s-8);
+  padding: var(--s-8);
+}
+
+.plate-head h1 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-display);
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+
+.plate-head .sub {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-small);
+  color: var(--ink-dim);
+}
+
+.readout {
+  min-width: min(30rem, 90vw);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-6);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* No trailing hairline — a rule under the last row reads as a broken table. */
+.row:last-child {
+  border-bottom: none;
+}
+
+.row .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: var(--fs-small);
+  color: var(--ink);
+  text-align: right;
+  word-break: break-word;
+}
+
+.row .v.ok {
+  color: var(--valid-time);
+}
+
+.row .v.warn {
+  color: var(--deny);
+}
+
+.plate-foot {
+  text-align: center;
+}

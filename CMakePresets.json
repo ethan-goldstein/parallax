@@ -1,0 +1,82 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+
+    {
+      "name": "native-debug",
+      "displayName": "native · debug · ASan+UBSan",
+      "description": "The default working build. Sanitizers are on from the first commit, not added later once bugs appear.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-g -O0 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+
+    {
+      "name": "native-release",
+      "displayName": "native · release",
+      "description": "Benchmark build. Deliberately no -march=native: it makes local numbers incomparable to CI numbers, and a benchmark you cannot reproduce on another machine is a claim rather than a measurement.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG"
+      }
+    },
+
+    {
+      "name": "wasm-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "BUILD_TESTING": "OFF" }
+    },
+
+    {
+      "name": "wasm-release",
+      "displayName": "wasm · release",
+      "description": "What ships to GitHub Pages.",
+      "inherits": "wasm-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+
+    {
+      "name": "wasm-debug",
+      "displayName": "wasm · debug · SAFE_HEAP",
+      "description": "For bugs that only reproduce in the browser. SAFE_HEAP is roughly 10x slower but catches the out-of-bounds and misaligned heap access that the JS<->WASM boundary produces, which is otherwise invisible.",
+      "inherits": "wasm-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "native-debug",   "configurePreset": "native-debug" },
+    { "name": "native-release", "configurePreset": "native-release" },
+    { "name": "wasm-release",   "configurePreset": "wasm-release" },
+    { "name": "wasm-debug",     "configurePreset": "wasm-debug" }
+  ],
+
+  "testPresets": [
+    {
+      "name": "native-debug",
+      "configurePreset": "native-debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    {
+      "name": "native-release",
+      "configurePreset": "native-release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    }
+  ]
+}

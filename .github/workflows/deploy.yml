@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+  # The snapshot job commits refreshed .pxsnap files with GITHUB_TOKEN, and
+  # commits made with that token deliberately do not trigger other workflows —
+  # otherwise a workflow could trigger itself forever. Without this hook fresh
+  # data would sit in the repo undeployed until the next unrelated push.
+  # Chaining on workflow_run avoids having to create and rotate a PAT.
+  workflow_run:
+    workflows: ['Snapshot']
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.5 # must match scripts/bootstrap.sh
+          actions-cache-folder: emsdk-cache
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build engine (wasm, release)
+        run: ./scripts/build-wasm.sh wasm-release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - run: npm run build
+        working-directory: web
+
+      # GitHub Pages serves 404.html for unknown paths. Copying index.html over
+      # it makes client-side routing survive a hard refresh on a deep link,
+      # which is the same trick used in ABROAD and Portfolio.
+      - name: SPA fallback
+        run: cp web/dist/index.html web/dist/404.html
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

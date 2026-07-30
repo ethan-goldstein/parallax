@@ -1,0 +1,17 @@
+{
+  "name": "parallax-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PARALLAX — browser front end for the C++/WASM bitemporal engine",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

@@ -1,0 +1,130 @@
+/* ── PARALLAX design tokens ──────────────────────────────────────────────────
+   Locked deliberately and early. Colour decisions here are downstream of one
+   semantic rule, so they are not open to preference:
+
+     THE TWO TIME AXES OWN TWO COLOURS, ABSOLUTELY, EVERYWHERE.
+       teal   (--valid-time)  = valid time  — when something was true
+       violet (--system-time) = system time — when we came to believe it
+
+   Scrubber axes, timeline strips, provenance chips, EXPLAIN borders on
+   temporal operators, table headers. A user who spends ten seconds with the
+   interface has internalised bitemporality without reading a word, and that is
+   the entire design argument. Nothing else in the palette may use those hues.
+
+   The visual reference is a measuring instrument — oscilloscope face, Swiss
+   timetable, Bloomberg terminal — not a science-fiction HUD. No glow, no
+   scanlines, no bevels, no gradient borders. Hairlines and negative space.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces. Warm near-black, not blue-black: every OSINT dashboard on the
+     internet is blue-black, and the difference reads immediately even to
+     someone who cannot name it. */
+  --bg: #0b0b0d;
+  --panel: #141417;
+  --panel-raised: #1b1b1f;
+  --rule: #2a2a30;
+
+  /* Ink. Bone rather than pure white — #fff on near-black vibrates. */
+  --ink: #e8e6e1;
+  --ink-dim: #8a8a93;
+  --ink-faint: #5c5c64;
+
+  /* Signal amber, P3 phosphor. Reserved for interaction and focus. If amber
+     appears on something you cannot click or have not selected, that is a bug. */
+  --accent: #ffb000;
+  --accent-dim: #8a5f00;
+
+  /* The two time axes. Load-bearing — see the header. */
+  --valid-time: #3fd0c9;
+  --system-time: #a78bfa;
+
+  /* Policy denial only. Never used for "error" generally, so that seeing it
+     always means exactly one thing: a rule refused. */
+  --deny: #e5484d;
+
+  /* Typography. One grotesque for prose, one true monospace for every number.
+     Tabular figures are not decorative: columns of right-aligned digits that
+     do not shift as values change is most of what makes a dense readout
+     legible. Self-hosted faces land in Phase 3; the stacks degrade cleanly. */
+  --font-ui: 'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+
+  --fs-micro: 0.6875rem; /* 11px — HUD labels */
+  --fs-small: 0.8125rem; /* 13px */
+  --fs-body: 0.9375rem; /* 15px */
+  --fs-large: 1.25rem;
+  --fs-display: 2rem;
+
+  --tracking-hud: 0.14em; /* uppercase micro-labels only */
+
+  /* Space. A 4px base grid; everything is a multiple. */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-6: 1.5rem;
+  --s-8: 2rem;
+  --s-12: 3rem;
+
+  --radius: 2px; /* nearly square — instrument panel, not consumer app */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Every numeric readout in the application. Tabular figures + right alignment
+   is applied here once rather than remembered at each call site. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  text-align: right;
+}
+
+.hud-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-hud);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Respect the OS setting rather than treating motion as decoration that must
+   be seen. Phase 8 does a full pass; establishing it now means no animation
+   ever ships without it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

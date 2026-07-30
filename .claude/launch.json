@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "parallax",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "/Users/ethangoldstein/AI-WORK/parallax/web"],
+      "port": 5181
+    },
+    {
+      "name": "parallax-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--prefix", "/Users/ethangoldstein/AI-WORK/parallax/web"],
+      "port": 4173
+    }
+  ]
+}
