@@ -185,3 +185,58 @@
     display: none;
   }
 }
+
+/* ── layer panel ─────────────────────────────────────────────────────────── */
+
+.layers {
+  top: 84px;
+  left: var(--s-6);
+  width: 12rem;
+  pointer-events: auto;
+}
+
+.layer-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.layer-row:last-child {
+  border-bottom: none;
+}
+
+/* A feed that is down stays listed and says so. Hiding it would make a partial
+   picture look like a complete one — the failure mode this project exists to
+   argue against. */
+.layer-row.dead {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.layer-row input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.layer-row .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-small);
+}
+
+.obligation {
+  color: var(--ink-faint);
+}
+
+@media (max-width: 720px) {
+  .layers {
+    top: auto;
+    bottom: 210px;
+    left: var(--s-4);
+    width: 10rem;
+  }
+}

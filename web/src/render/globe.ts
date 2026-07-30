@@ -43,16 +43,35 @@ export interface GlobeOptions {
   maxPoints: number
 }
 
+/** Visual identity for one data layer. */
+export interface LayerSpec {
+  colorLow: number
+  colorHigh: number
+  /** Base radius in world units before the scalar contribution. */
+  sizeBase: number
+  /** How much the per-point scalar grows the radius. */
+  sizeScale: number
+  /** Scalar value mapped to colorLow, and to colorHigh. */
+  rampLow: number
+  rampHigh: number
+}
+
+/** A layer's GPU-side state, pointing at engine-owned memory. */
+interface PointLayer {
+  mesh: THREE.Mesh
+  geometry: THREE.InstancedBufferGeometry
+  material: THREE.ShaderMaterial
+  interleaved: THREE.InstancedInterleavedBuffer
+}
+
 export class Globe {
   readonly scene = new THREE.Scene()
   readonly camera: THREE.PerspectiveCamera
   #renderer: THREE.WebGLRenderer
   #container: HTMLElement
 
-  #points: THREE.Mesh
-  #interleaved: THREE.InstancedInterleavedBuffer | null = null
-  #geometry: THREE.InstancedBufferGeometry
-  #material: THREE.ShaderMaterial
+  #layers = new Map<string, PointLayer>()
+  #maxPoints: number
 
   #rotation = 0
   #autoRotate = true
@@ -86,11 +105,7 @@ export class Globe {
     this.scene.add(this.#buildGraticule())
     this.scene.add(this.#buildAtmosphere())
 
-    const built = this.#buildPoints(opts.maxPoints)
-    this.#geometry = built.geometry
-    this.#material = built.material
-    this.#points = built.mesh
-    this.scene.add(this.#points)
+    this.#maxPoints = opts.maxPoints
 
     this.#resize()
     window.addEventListener('resize', this.#resize)
@@ -176,11 +191,13 @@ export class Globe {
 
   // ── the data layer ───────────────────────────────────────────────────────
 
-  #buildPoints(maxPoints: number): {
-    geometry: THREE.InstancedBufferGeometry
-    material: THREE.ShaderMaterial
-    mesh: THREE.Mesh
-  } {
+  /**
+   * Creates a named data layer. Each layer owns one instanced draw call and
+   * one colour ramp, so seismic and maritime data stay visually distinct
+   * without either of them needing a per-point source field in the wire
+   * format — which would break the 16-byte vec4 stride.
+   */
+  addLayer(name: string, spec: LayerSpec): void {
     // A single quad per instance, oriented to face the camera in the shader.
     // Cheaper than a sphere per point by two orders of magnitude, and at these
     // sizes a screen-facing disc is visually identical.
@@ -192,23 +209,28 @@ export class Globe {
     geometry.setIndex([0, 1, 2, 0, 2, 3])
     geometry.instanceCount = 0
 
-    // Placeholder buffer, replaced on the first updateFromHeap() by a view over
-    // wasm memory. Allocated at full size so the GPU-side buffer is sized once.
-    const placeholder = new Float32Array(maxPoints * POINT_FLOATS)
-    this.#attachInterleaved(geometry, placeholder)
+    // Placeholder, replaced on the first updateLayer() by a view over wasm
+    // memory. Allocated at full size so the GPU buffer is sized once.
+    const buffer = this.#attachInterleaved(geometry, new Float32Array(this.#maxPoints * POINT_FLOATS))
 
     const material = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       uniforms: {
-        uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-        uColorLow: { value: new THREE.Color(0xffb000) },
-        uColorHigh: { value: new THREE.Color(0xe5484d) },
+        uColorLow: { value: new THREE.Color(spec.colorLow) },
+        uColorHigh: { value: new THREE.Color(spec.colorHigh) },
+        uSizeBase: { value: spec.sizeBase },
+        uSizeScale: { value: spec.sizeScale },
+        uRampLow: { value: spec.rampLow },
+        uRampHigh: { value: spec.rampHigh },
       },
       vertexShader: /* glsl */ `
         attribute vec2 aLatLon;
         attribute float aScalar;
+
+        uniform float uSizeBase;
+        uniform float uSizeScale;
 
         varying float vScalar;
         varying vec2 vQuad;
@@ -219,23 +241,21 @@ export class Globe {
           vScalar = aScalar;
           vQuad = position.xy;
 
-          // Lift slightly off the surface so points are not z-fighting the
-          // sphere at grazing angles.
+          // Lift slightly off the surface so points do not z-fight the sphere
+          // at grazing angles.
           vec3 world = latLonToVec3(aLatLon.x, aLatLon.y, 1.008);
           vec4 mv = modelViewMatrix * vec4(world, 1.0);
 
-          // Magnitude drives radius. Earthquake magnitude is logarithmic, so a
-          // linear size ramp already encodes an exponential energy difference —
-          // no extra scaling curve needed.
-          float size = 0.006 + max(aScalar, 0.0) * 0.0045;
-          mv.xy += position.xy * size;
-
+          mv.xy += position.xy * (uSizeBase + max(aScalar, 0.0) * uSizeScale);
           gl_Position = projectionMatrix * mv;
         }
       `,
       fragmentShader: /* glsl */ `
         uniform vec3 uColorLow;
         uniform vec3 uColorHigh;
+        uniform float uRampLow;
+        uniform float uRampHigh;
+
         varying float vScalar;
         varying vec2 vQuad;
 
@@ -246,22 +266,26 @@ export class Globe {
           float core = smoothstep(1.0, 0.0, d);
           float halo = pow(core, 4.0);
 
-          vec3 c = mix(uColorLow, uColorHigh, clamp((vScalar - 2.5) / 4.0, 0.0, 1.0));
-          gl_FragColor = vec4(c, halo * 0.85 + core * 0.15);
+          float t = clamp((vScalar - uRampLow) / max(uRampHigh - uRampLow, 1e-6), 0.0, 1.0);
+          gl_FragColor = vec4(mix(uColorLow, uColorHigh, t), halo * 0.85 + core * 0.15);
         }
       `,
     })
 
     const mesh = new THREE.Mesh(geometry, material)
-    // The bounding sphere is meaningless for instanced geometry whose real
-    // positions are computed in the shader; without this Three.js frustum-culls
-    // the whole layer the moment the origin quad leaves view.
+    // Instanced positions are computed in the shader, so the CPU-side bounding
+    // sphere is meaningless; without this Three.js culls the whole layer the
+    // moment the origin quad leaves view.
     mesh.frustumCulled = false
 
-    return { geometry, material, mesh }
+    this.scene.add(mesh)
+    this.#layers.set(name, { mesh, geometry, material, interleaved: buffer })
   }
 
-  #attachInterleaved(geometry: THREE.InstancedBufferGeometry, array: Float32Array): void {
+  #attachInterleaved(
+    geometry: THREE.InstancedBufferGeometry,
+    array: Float32Array,
+  ): THREE.InstancedInterleavedBuffer {
     const buffer = new THREE.InstancedInterleavedBuffer(array, POINT_FLOATS, 1)
     buffer.setUsage(THREE.DynamicDrawUsage)
 
@@ -270,33 +294,37 @@ export class Globe {
     geometry.setAttribute('aLatLon', new THREE.InterleavedBufferAttribute(buffer, 2, 0))
     geometry.setAttribute('aScalar', new THREE.InterleavedBufferAttribute(buffer, 1, 2))
 
-    this.#interleaved = buffer
+    return buffer
   }
 
   /**
-   * Points at a fresh view over the wasm heap.
+   * Points a layer at a fresh view over the wasm heap.
    *
-   * `view` must be re-derived from Heap on every call — never cached by the
-   * caller. If the underlying ArrayBuffer identity changed (heap growth, or an
-   * engine-side reallocation) the interleaved buffer is rebuilt; otherwise only
-   * the dirty flag is set and the same GPU buffer is re-uploaded.
+   * `view` must be re-derived from Heap on every call and never cached by the
+   * caller. If the underlying ArrayBuffer identity changed — heap growth, or
+   * an engine-side reallocation — the interleaved buffer is rebuilt; otherwise
+   * only the dirty flag is set and the same GPU buffer is re-uploaded.
    */
-  updateFromHeap(view: Float32Array, count: number): void {
-    const buffer = this.#interleaved
-    if (buffer === null) return
+  updateLayer(name: string, view: Float32Array, count: number): void {
+    const layer = this.#layers.get(name)
+    if (!layer) return
 
-    if (buffer.array !== view) {
-      // Identity changed, so the old buffer refers to memory that may no longer
-      // be ours. Rebuilding is correct and rare; doing it every frame would
-      // throw away the GPU-side buffer each time.
-      this.#geometry.deleteAttribute('aLatLon')
-      this.#geometry.deleteAttribute('aScalar')
-      buffer.array = view
-      this.#attachInterleaved(this.#geometry, view)
+    if (layer.interleaved.array !== view) {
+      // Identity changed, so the old buffer may refer to memory that is no
+      // longer ours. Rebuilding is correct and rare; doing it every frame
+      // would discard the GPU-side buffer each time.
+      layer.geometry.deleteAttribute('aLatLon')
+      layer.geometry.deleteAttribute('aScalar')
+      layer.interleaved = this.#attachInterleaved(layer.geometry, view)
     }
 
-    this.#interleaved!.needsUpdate = true
-    this.#geometry.instanceCount = count
+    layer.interleaved.needsUpdate = true
+    layer.geometry.instanceCount = count
+  }
+
+  setLayerVisible(name: string, visible: boolean): void {
+    const layer = this.#layers.get(name)
+    if (layer) layer.mesh.visible = visible
   }
 
   // ── loop ─────────────────────────────────────────────────────────────────
@@ -371,8 +399,11 @@ export class Globe {
       else if (mat) mat.dispose()
     })
 
-    this.#material.dispose()
-    this.#geometry.dispose()
+    for (const layer of this.#layers.values()) {
+      layer.material.dispose()
+      layer.geometry.dispose()
+    }
+    this.#layers.clear()
     this.#renderer.dispose()
     this.#renderer.domElement.remove()
   }
