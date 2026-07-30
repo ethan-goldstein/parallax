@@ -50,11 +50,25 @@ jobs:
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # ubuntu-latest defaults to GCC, which has no libFuzzer — so the link
+      # probe in tests/CMakeLists.txt correctly skips the target and the run
+      # step then fails on a missing binary. Ask for clang explicitly.
       - name: Configure
-        run: cmake --preset fuzz
+        run: cmake --preset fuzz -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
       - name: Build
         run: cmake --build --preset fuzz
+
+      # The probe is designed to skip silently, which is right for a local
+      # build and wrong for CI: a fuzz job that quietly runs nothing is worse
+      # than no fuzz job, because the green check implies coverage that does
+      # not exist. Fail loudly instead.
+      - name: Verify the fuzzer was actually built
+        run: |
+          if [ ! -x ./build/fuzz/tests/fuzz_parser ]; then
+            echo "::error::fuzz_parser was not built — libFuzzer probe failed on a runner that should have it"
+            exit 1
+          fi
 
       - name: Fuzz
         run: ./build/fuzz/tests/fuzz_parser -max_total_time=60 -print_final_stats=1
