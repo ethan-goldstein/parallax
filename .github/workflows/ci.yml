@@ -36,6 +36,42 @@ jobs:
       - name: Test
         run: ctest --preset native-debug
 
+  # ── parser fuzzing ────────────────────────────────────────────────────────
+  # The parser is the only component that consumes genuinely arbitrary input —
+  # a user types into a box — so the hand-written cases cover the shapes I
+  # thought of and this covers the ones I did not. Runs on Linux because
+  # Apple's clang does not ship libFuzzer.
+  fuzz:
+    name: fuzz · parser · 60s
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake --preset fuzz
+
+      - name: Build
+        run: cmake --build --preset fuzz
+
+      - name: Fuzz
+        run: ./build/fuzz/tests/fuzz_parser -max_total_time=60 -print_final_stats=1
+
+      # A crash writes its reproducer to the working directory. Uploading it
+      # means a CI failure arrives with the exact bytes that caused it.
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+          if-no-files-found: ignore
+
   # ── web · typecheck + build ───────────────────────────────────────────────
   # Builds the real wasm so the TypeScript is checked against the actual embind
   # surface rather than against a stub that can drift from it.

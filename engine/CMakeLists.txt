@@ -10,6 +10,8 @@
 add_library(px_core STATIC
   src/arena.cpp
   src/geo.cpp
+  src/ql/lexer.cpp
+  src/ql/parser.cpp
   src/session.cpp
   src/store.cpp
   src/symbols.cpp

@@ -33,6 +33,7 @@ add_executable(px_tests
   main.cpp
   test_arena.cpp
   test_geo.cpp
+  test_ql.cpp
   test_session.cpp
   test_store.cpp
   test_symbols.cpp
@@ -46,3 +47,34 @@ add_test(NAME px_tests COMMAND px_tests)
 # --no-tests=error stops a broken filter or an empty binary from reporting
 # success, which is the failure mode that makes a green CI badge meaningless.
 set_tests_properties(px_tests PROPERTIES TIMEOUT 300)
+
+# ── fuzzing ──────────────────────────────────────────────────────────────────
+# libFuzzer ships with upstream clang but NOT with Apple's Xcode clang, which
+# omits libclang_rt.fuzzer_osx.a entirely. So probe for it by actually linking
+# a program rather than by testing the compiler id or the platform — that way
+# the target appears wherever it genuinely works (CI on Linux, or locally with
+# `brew install llvm`) and is skipped with a clear message where it does not,
+# instead of failing at link time.
+include(CheckCXXSourceCompiles)
+
+set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=fuzzer")
+check_cxx_source_compiles([[
+  #include <cstddef>
+  #include <cstdint>
+  extern "C" int LLVMFuzzerTestOneInput(const uint8_t*, size_t) { return 0; }
+]] PX_HAVE_LIBFUZZER)
+unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_REQUIRED_LINK_OPTIONS)
+
+if(PX_HAVE_LIBFUZZER)
+  add_executable(fuzz_parser fuzz_parser.cpp)
+  target_link_libraries(fuzz_parser PRIVATE px_core px_warnings)
+  # -fsanitize=fuzzer supplies main(); address+undefined turn a silent
+  # out-of-bounds into an immediate, reproducible abort with a saved input.
+  target_compile_options(fuzz_parser PRIVATE -fsanitize=fuzzer,address,undefined -g -O1)
+  target_link_options(fuzz_parser PRIVATE -fsanitize=fuzzer,address,undefined)
+else()
+  message(STATUS "PARALLAX: libFuzzer unavailable - fuzz_parser skipped "
+                 "(Apple clang omits it; CI runs it on Linux)")
+endif()
