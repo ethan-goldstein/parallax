@@ -102,10 +102,49 @@ Session::PointBatch Session::query_points(Timestamp valid_at, u32 sys_at,
 
     store_.as_of(valid_at, TxnId{sys_at}, scratch_, &last_scan_);
 
-    // Two passes over the result set rather than one: collect the geo facts,
-    // then look up each entity's scalar. Doing it in a single pass would mean
-    // a hash map keyed by entity, and at these sizes the second lookup through
-    // the CSR entity index is cheaper than building one.
+    // Pass 1 — index the scalar attribute by entity.
+    //
+    // The obvious implementation looks up each point's scalar with a second
+    // as_of_entity() call inside the emit loop. That was the first version and
+    // it measured 8.8 ms for 7k facts, because it allocated a std::vector per
+    // point: ~3.7 us each, entirely in malloc, for work the result set already
+    // contained.
+    //
+    // Both attributes are in `scratch_` already — they were returned by the
+    // same bitemporal slice. So index them in one linear pass instead.
+    //
+    // The index is a flat array subscripted by entity id, which is only viable
+    // because entity ids are dense (EntityRegistry in usgs.ts hands out
+    // sequential ids for exactly this reason). Stamping with a per-query
+    // counter avoids clearing the array between queries — a memset of a
+    // 100k-entry array on every scrubber tick would reintroduce the cost this
+    // is removing.
+    ++query_stamp_;
+    if (scalar_attr.valid()) {
+      for (const FactId f : scratch_) {
+        if (store_.fact_attr(f) != scalar_attr) continue;
+
+        const Value av = store_.fact_value(f);
+        f32 s;
+        if (av.kind == Kind::F64) s = static_cast<f32>(av.as_f64());
+        else if (av.kind == Kind::I64) s = static_cast<f32>(av.as_i64());
+        else continue;
+
+        const usize e = store_.fact_entity(f).index();
+        if (e >= scalar_by_entity_.size()) {
+          scalar_by_entity_.resize(e + 1, 0.0f);
+          scalar_stamp_.resize(e + 1, 0u);
+        }
+        scalar_by_entity_[e] = s;
+        scalar_stamp_[e] = query_stamp_;
+      }
+    }
+
+    // Pass 2 — emit the geo facts, reading scalars from the index.
+    //
+    // Bitemporally consistent by construction: both attributes came out of one
+    // as_of(T, S), so a point can never show one instant's magnitude at
+    // another instant's position.
     for (const FactId f : scratch_) {
       if (written >= point_capacity_) {
         truncated = 1;
@@ -117,23 +156,11 @@ Session::PointBatch Session::query_points(Timestamp valid_at, u32 sys_at,
       if (v.kind != Kind::Geo) continue;
 
       const GeoPoint g = v.as_geo();
-      const EntityId entity = store_.fact_entity(f);
+      const usize e = store_.fact_entity(f).index();
 
-      f32 scalar = 0.0f;
-      if (scalar_attr.valid()) {
-        // Bitemporally consistent by construction: the scalar is read at the
-        // same (T, S) as the position, so a point never shows today's
-        // magnitude at last week's location.
-        std::vector<FactId> attrs;
-        store_.as_of_entity(entity, valid_at, TxnId{sys_at}, attrs);
-        for (const FactId a : attrs) {
-          if (store_.fact_attr(a) != scalar_attr) continue;
-          const Value av = store_.fact_value(a);
-          if (av.kind == Kind::F64) scalar = static_cast<f32>(av.as_f64());
-          else if (av.kind == Kind::I64) scalar = static_cast<f32>(av.as_i64());
-          break;
-        }
-      }
+      const f32 scalar =
+          (e < scalar_stamp_.size() && scalar_stamp_[e] == query_stamp_) ? scalar_by_entity_[e]
+                                                                        : 0.0f;
 
       points_[written] = wire::Point{static_cast<f32>(g.lat()), static_cast<f32>(g.lon()),
                                      scalar, f.v};

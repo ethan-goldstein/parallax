@@ -1,41 +1,173 @@
 // ── bindings/wasm/px_wasm.cpp ───────────────────────────────────────────────
-// The ONLY file in the project permitted to include <emscripten/*>.
+// The ONLY file in the project permitted to include <emscripten/*>, and the
+// only place that knows a pointer fits in 32 bits.
 //
-// Everything the browser can call lives here, and the surface is capped at
-// roughly 20 functions on purpose. embind is the right tool for the control
-// plane — a handful of calls per second that need strings and structured
-// returns — and the wrong tool for bulk data, where emscripten::val and
-// register_vector copy far more than their documentation implies. Bulk paths
-// (Phase 3 onward) move through raw pointers into engine-owned buffers
-// instead, and never appear in this file's binding list.
+// The engine deals in real pointers and in offsets (see px/session.hpp). This
+// file is where a pointer becomes a heap address JavaScript can build a
+// DataView over. Keeping that narrowing in one place is what lets the whole
+// engine compile and be tested natively, where pointers are 64-bit.
+//
+// The embind surface is capped at ~20 functions on purpose. embind is right
+// for the control plane — a few calls per second that need strings and
+// structured returns — and wrong for bulk data, where emscripten::val and
+// register_vector copy far more than the docs imply. Every high-volume path
+// travels as raw bytes through a pointer instead, and never appears below.
 // ────────────────────────────────────────────────────────────────────────────
 #include <emscripten/bind.h>
 
+#include <memory>
 #include <string>
 
+#include "px/session.hpp"
 #include "px/version.hpp"
 
 namespace {
 
-// embind marshals std::string cleanly to a JS string. Returning const char*
-// would bind as a raw pointer and surface in JS as an integer address, which
-// is a confusing five minutes the first time it happens.
-std::string version() {
-  return std::string(px::version());
+// Pulled in individually rather than `using namespace px`, so it stays obvious
+// which names here belong to the engine and which are local to the binding.
+using px::u32;
+using px::usize;
+
+// One session per tab. A second one would mean a second store and a second set
+// of buffers, and a selection bitset that silently referred to the wrong one.
+std::unique_ptr<px::Session> g_session;
+
+px::Session& session() {
+  if (!g_session) g_session = std::make_unique<px::Session>();
+  return *g_session;
 }
 
-std::string build_target() {
-  return std::string(px::build_target());
+/// Narrows a real pointer to a wasm heap address.
+///
+/// Safe here and nowhere else: under wasm32 the entire linear memory is
+/// addressable in 32 bits, so this is a lossless conversion. The same line in
+/// the engine would truncate a 64-bit native pointer.
+u32 heap_addr(const void* p) {
+  return static_cast<u32>(reinterpret_cast<usize>(p));
 }
 
-bool has_simd() {
-  return px::has_simd();
+// ── plain values crossing to JS ────────────────────────────────────────────
+
+struct JsBufferRef {
+  u32 ptr = 0;
+  u32 count = 0;
+  u32 stride = 0;
+  u32 generation = 0;
+  u32 truncated = 0;
+};
+
+struct JsIngestResult {
+  u32 accepted = 0;
+  u32 rejected = 0;
+  u32 txn = 0;
+};
+
+struct JsScanStats {
+  u32 chunksTotal = 0;
+  u32 chunksSkipped = 0;
+  u32 rowsScanned = 0;
+  u32 rowsMatched = 0;
+  double queryMs = 0.0;
+};
+
+// ── control plane ──────────────────────────────────────────────────────────
+
+void init(u32 max_points) {
+  g_session = std::make_unique<px::Session>(max_points);
 }
+
+u32 intern(const std::string& s) {
+  return session().intern(s).v;
+}
+
+u32 staging_ptr(u32 bytes) {
+  return heap_addr(session().staging_buffer(bytes));
+}
+
+JsIngestResult ingest(u32 byte_offset, u32 byte_len, double wall_clock_unix) {
+  const px::IngestResult r =
+      session().ingest(byte_offset, byte_len, static_cast<px::i64>(wall_clock_unix));
+  return JsIngestResult{r.accepted, r.rejected, r.txn.v};
+}
+
+JsBufferRef query_points(int valid_at, u32 sys_at, u32 geo_attr, u32 scalar_attr) {
+  const px::Session::PointBatch b = session().query_points(
+      static_cast<px::Timestamp>(valid_at), sys_at, px::SymbolId{geo_attr},
+      px::SymbolId{scalar_attr});
+
+  return JsBufferRef{heap_addr(b.data), b.count,
+                     static_cast<u32>(sizeof(px::wire::Point)), b.generation, b.truncated};
+}
+
+JsScanStats last_scan() {
+  const px::ScanStats& s = session().last_scan();
+  return JsScanStats{s.chunks_total, s.chunks_skipped, s.rows_scanned, s.rows_matched,
+                     session().last_query_ms()};
+}
+
+u32 fact_count() { return static_cast<u32>(session().store().fact_count()); }
+u32 txn_count() { return static_cast<u32>(session().store().transactions().size()); }
+u32 current_txn() { return session().store().current_txn().v; }
+u32 generation() { return session().generation(); }
+double heap_bytes() { return static_cast<double>(session().store().heap_bytes()); }
+
+/// Wall-clock time of a transaction, as unix seconds. The scrubber's system
+/// axis is a transaction index; this is what labels it with something a human
+/// can read.
+double txn_wall_clock(u32 i) {
+  const auto& t = session().store().transactions();
+  if (i >= t.size()) return 0.0;
+  return static_cast<double>(t[i].wall_clock_unix);
+}
+
+u32 txn_fact_count(u32 i) {
+  const auto& t = session().store().transactions();
+  if (i >= t.size()) return 0;
+  return t[i].fact_count;
+}
+
+std::string version() { return std::string(px::version()); }
+std::string build_target() { return std::string(px::build_target()); }
+bool has_simd() { return px::has_simd(); }
 
 }  // namespace
 
 EMSCRIPTEN_BINDINGS(parallax) {
+  emscripten::value_object<JsBufferRef>("BufferRef")
+      .field("ptr", &JsBufferRef::ptr)
+      .field("count", &JsBufferRef::count)
+      .field("stride", &JsBufferRef::stride)
+      .field("generation", &JsBufferRef::generation)
+      .field("truncated", &JsBufferRef::truncated);
+
+  emscripten::value_object<JsIngestResult>("IngestResult")
+      .field("accepted", &JsIngestResult::accepted)
+      .field("rejected", &JsIngestResult::rejected)
+      .field("txn", &JsIngestResult::txn);
+
+  emscripten::value_object<JsScanStats>("ScanStats")
+      .field("chunksTotal", &JsScanStats::chunksTotal)
+      .field("chunksSkipped", &JsScanStats::chunksSkipped)
+      .field("rowsScanned", &JsScanStats::rowsScanned)
+      .field("rowsMatched", &JsScanStats::rowsMatched)
+      .field("queryMs", &JsScanStats::queryMs);
+
   emscripten::function("version", &version);
   emscripten::function("buildTarget", &build_target);
   emscripten::function("hasSimd", &has_simd);
+
+  emscripten::function("init", &init);
+  emscripten::function("intern", &intern);
+  emscripten::function("stagingPtr", &staging_ptr);
+  emscripten::function("ingest", &ingest);
+  emscripten::function("queryPoints", &query_points);
+
+  emscripten::function("lastScan", &last_scan);
+  emscripten::function("factCount", &fact_count);
+  emscripten::function("txnCount", &txn_count);
+  emscripten::function("currentTxn", &current_txn);
+  emscripten::function("generation", &generation);
+  emscripten::function("heapBytes", &heap_bytes);
+  emscripten::function("txnWallClock", &txn_wall_clock);
+  emscripten::function("txnFactCount", &txn_fact_count);
 }

@@ -120,6 +120,14 @@ class Session {
   // loop performs no allocation at all.
   std::vector<FactId> scratch_;
 
+  // Scalar-by-entity index, rebuilt per query. `scalar_stamp_` holds the query
+  // counter that last wrote each slot, so staleness is detected by comparison
+  // instead of by clearing the array — which at 100k entities would cost more
+  // than the lookup it replaces.
+  std::vector<f32> scalar_by_entity_;
+  std::vector<u32> scalar_stamp_;
+  u32 query_stamp_ = 0;
+
   u32 generation_ = 1;
   ScanStats last_scan_{};
   f64 last_query_ms_ = 0.0;
