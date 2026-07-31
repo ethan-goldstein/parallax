@@ -1151,7 +1151,7 @@
 /* The legend. Without it the map is coloured dots with no stated meaning. */
 .layer-key {
   display: grid;
-  grid-template-columns: 2.6rem 1fr;
+  grid-template-columns: auto 2.6rem 1fr;
   align-items: center;
   gap: var(--s-2);
   padding: 0 var(--s-3) var(--s-2);
@@ -1952,3 +1952,17 @@ body:has(.dock[hidden]) .maplibregl-ctrl-bottom-left {
 
 .rc-refuses { border-bottom: none; }
 .rc-refuses strong { color: var(--ink-dim); font-weight: 400; }
+
+/* The mark this layer draws on the map, beside the ramp that colours it. */
+.layer-glyph {
+  width: 16px;
+  height: 16px;
+  opacity: 0.85;
+  image-rendering: auto;
+}
+
+.layer-key-zoom {
+  grid-template-columns: 1fr;
+  padding-top: 0;
+  opacity: 0.75;
+}

@@ -60,6 +60,9 @@ export const LAYERS: readonly LayerDef[] = [
       sizeScale: 2.6, // px per magnitude point
       rampLow: 2.5,
       rampHigh: 6.5,
+      glyph: 'quake',
+      iconMinZoom: 5.5,
+      iconSize: 16,
     },
   },
   {
@@ -86,6 +89,9 @@ export const LAYERS: readonly LayerDef[] = [
       // Vessels are assets, not energy. Additive blending would make a crowded
       // anchorage read as one bright smear instead of many ships.
       blend: 'normal',
+      glyph: 'ship',
+      iconMinZoom: 6,
+      iconSize: 15,
     },
   },
   {
@@ -118,6 +124,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampLow: 0,
       rampHigh: 2,
       blend: 'normal',
+      glyph: 'anchor',
+      iconMinZoom: 3,
+      iconSize: 17,
     },
   },
   {
@@ -139,6 +148,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampLow: 0,
       rampHigh: 1,
       blend: 'normal',
+      glyph: 'strait',
+      iconMinZoom: 2,
+      iconSize: 19,
     },
   },
   {
@@ -168,6 +180,9 @@ export const LAYERS: readonly LayerDef[] = [
       sizeScale: 3.0, // px per alert level
       rampLow: 0,
       rampHigh: 2,
+      glyph: 'warning',
+      iconMinZoom: 3,
+      iconSize: 17,
     },
   },
   {
@@ -191,6 +206,9 @@ export const LAYERS: readonly LayerDef[] = [
       sizeScale: 0,
       rampLow: 0,
       rampHigh: 1,
+      glyph: 'flame',
+      iconMinZoom: 4,
+      iconSize: 16,
     },
   },
   {
@@ -225,6 +243,9 @@ export const LAYERS: readonly LayerDef[] = [
       sizeScale: 1.1, // px per severity step
       rampLow: 0,
       rampHigh: 4,
+      glyph: 'storm',
+      iconMinZoom: 6,
+      iconSize: 17,
     },
   },
   {
@@ -260,6 +281,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampHigh: 40_000,
       // Assets, not energy.
       blend: 'normal',
+      glyph: 'jet',
+      iconMinZoom: 4,
+      iconSize: 17,
     },
   },
   {
@@ -287,6 +311,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampLow: 0,
       rampHigh: 40_000,
       blend: 'normal',
+      glyph: 'airliner',
+      iconMinZoom: 6,
+      iconSize: 15,
     },
   },
   {
@@ -315,6 +342,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampLow: 300,
       rampHigh: 36_000,
       blend: 'normal',
+      glyph: 'satellite',
+      iconMinZoom: 3,
+      iconSize: 17,
     },
   },
   {
@@ -336,6 +366,9 @@ export const LAYERS: readonly LayerDef[] = [
       rampLow: 0,
       rampHigh: 1,
       blend: 'normal',
+      glyph: 'node',
+      iconMinZoom: 2,
+      iconSize: 18,
     },
   },
   {
@@ -360,6 +393,9 @@ export const LAYERS: readonly LayerDef[] = [
       sizeScale: 0.05, // px per percentage point
       rampLow: 10,
       rampHigh: 70,
+      glyph: 'aurora',
+      iconMinZoom: 5,
+      iconSize: 16,
     },
   },
 ]

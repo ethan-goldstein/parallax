@@ -33,6 +33,7 @@ import { Scrubber } from './ui/scrubber'
 import { QueryBuilder } from './ui/queryBuilder'
 import { hasAsOf } from './ui/queryBuilder/compile'
 import { buildReconBatch, ReconPanel } from './ui/recon'
+import { buildAtlas } from './render/icons'
 import { buildShell } from './ui/shell'
 import { TabRail, type TabDef } from './ui/tabs'
 
@@ -938,6 +939,9 @@ async function main(): Promise<void> {
       specs: SOURCE_SPECS,
       attrs,
       feeds: () => feeds,
+      // The glyph sheet, so the marks can be inspected at size without
+      // screenshotting the map and guessing.
+      atlas: buildAtlas,
     },
   })
 }

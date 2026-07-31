@@ -35,6 +35,14 @@ uniform vec2 u_viewport;
 uniform float u_sizeBase;
 uniform float u_sizeScale;
 
+// 0 draws the disc, 1 draws the glyph. The CPU computes it from the map zoom
+// against the layer's own threshold — see PointsLayer.setZoom for why the
+// crossfade exists at all.
+uniform float u_iconMix;
+// Edge of the glyph mark in pixels. A silhouette needs roughly ten times the
+// radius a dot does before it is recognisable rather than a smudge.
+uniform float u_iconSize;
+
 out float v_scalar;
 out vec2 v_quad;
 
@@ -62,6 +70,11 @@ void main() {
   // matters: under globe projection projectTile writes a horizon distance into
   // .z rather than a depth, so far-side points are clipped by the GPU for free.
   // Perturbing .z here would put points on the back of the planet back on screen.
-  float px = u_sizeBase + max(a_scalar, 0.0) * u_sizeScale;
+  // The dot keeps its scalar-driven radius; the glyph does not. A plane drawn
+  // at a size proportional to its altitude would be encoding the altitude twice
+  // — once in colour, once in a shape whose whole job is to say "aircraft" — and
+  // the small ones would stop being readable as planes at all.
+  float dotPx = u_sizeBase + max(a_scalar, 0.0) * u_sizeScale;
+  float px = mix(dotPx, u_iconSize, u_iconMix);
   gl_Position.xy += a_quad * (px * 2.0 / u_viewport) * gl_Position.w;
 }

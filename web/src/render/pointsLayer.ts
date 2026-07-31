@@ -20,6 +20,7 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from
 
 import { POINT_FLOATS } from '../engine/abi'
 import { buildProgram, rgb, ShaderError, uniformLocations } from './glutil'
+import { buildAtlas, glyphUV, type GlyphName } from './icons'
 import FRAGMENT_SOURCE from './shaders/points.frag.glsl?raw'
 import VERTEX_BODY from './shaders/points.vert.glsl?raw'
 
@@ -48,6 +49,27 @@ export interface LayerSpec {
    * white, and two vessels in a harbour should not glow brighter than one.
    */
   blend?: 'additive' | 'normal'
+
+  /**
+   * The mark this layer draws once it is worth drawing a shape.
+   *
+   * Omitted keeps the disc at every zoom, which is right for a layer that is a
+   * density field rather than a set of objects.
+   */
+  glyph?: GlyphName
+
+  /**
+   * Zoom at which the glyph fully replaces the disc. Default 4.
+   *
+   * There has to be a threshold. Sixteen-pixel silhouettes are unreadable at
+   * world zoom for the same reason they are readable close in — they are ten
+   * times the area of a dot, and three thousand of them overlap into a solid
+   * sheet. Dense layers set this higher; sparse ones can afford it lower.
+   */
+  iconMinZoom?: number
+
+  /** Edge of the glyph in screen pixels. Default 17. */
+  iconSize?: number
 }
 
 const UNIFORMS = [
@@ -65,6 +87,10 @@ const UNIFORMS = [
   'u_rampLow',
   'u_rampHigh',
   'u_opacity',
+  'u_atlas',
+  'u_glyphUV',
+  'u_iconMix',
+  'u_iconSize',
 ] as const
 
 type Uniforms = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>
@@ -125,6 +151,23 @@ export class PointsLayer implements CustomLayerInterface {
 
   #count = 0
 
+  /**
+   * The glyph sheet, shared by every layer in this GL context.
+   *
+   * Static because there is exactly one atlas: uploading identical bytes once
+   * per layer would be twelve textures for one image, and the bind is the same
+   * either way.
+   */
+  static #atlasTexture: WebGLTexture | null = null
+  static #atlasGl: WebGL2RenderingContext | null = null
+
+  /** Current map zoom, pushed by Globe. Drives the disc↔glyph crossfade. */
+  #zoom = 0
+
+  setZoom(z: number): void {
+    this.#zoom = z
+  }
+
   /** Instances currently drawn. Read by the readout and by tests. */
   get count(): number {
     return this.#count
@@ -167,6 +210,8 @@ export class PointsLayer implements CustomLayerInterface {
     this.#instanceVbo = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, this.#instanceVbo)
     gl.bufferData(gl.ARRAY_BUFFER, this.maxPoints * POINT_FLOATS * 4, gl.DYNAMIC_DRAW)
+
+    PointsLayer.#ensureAtlas(gl)
 
     // One VAO, valid for every projection variant, because the shader pins
     // attribute locations explicitly rather than letting the linker assign them.
@@ -235,6 +280,47 @@ export class PointsLayer implements CustomLayerInterface {
     }
   }
 
+  /**
+   * Uploads the glyph sheet, once per GL context.
+   *
+   * Keyed on the context rather than a boolean: MapLibre recreates the context
+   * on a WebGL context-loss event, and a texture from the dead one would bind as
+   * nothing and every glyph would sample black.
+   *
+   * NEAREST would alias badly on a 17px mark drawn from a 64px cell, so both
+   * filters are linear, and both wraps are CLAMP_TO_EDGE — REPEAT would let a
+   * glyph sampled at its edge pull in the neighbouring cell.
+   */
+  static #ensureAtlas(gl: WebGL2RenderingContext): void {
+    if (PointsLayer.#atlasTexture && PointsLayer.#atlasGl === gl) return
+
+    const atlas = buildAtlas()
+    const tex = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas.canvas)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.bindTexture(gl.TEXTURE_2D, null)
+
+    PointsLayer.#atlasTexture = tex
+    PointsLayer.#atlasGl = gl
+  }
+
+  /**
+   * How far this layer is through the disc→glyph crossfade.
+   *
+   * Blended over one zoom level rather than switched, because a hard swap at a
+   * threshold reads as the map glitching. A layer with no glyph is always zero.
+   */
+  #iconMix(): number {
+    if (!this.spec.glyph) return 0
+    const at = this.spec.iconMinZoom ?? 4
+    return Math.max(0, Math.min(1, (this.#zoom - (at - 1)) / 1))
+  }
+
   #draw(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
     const { program, uniforms: u } = this.programs.get(gl, args.shaderData)
     gl.useProgram(program)
@@ -263,11 +349,21 @@ export class PointsLayer implements CustomLayerInterface {
     gl.uniform1f(u.u_rampHigh, this.spec.rampHigh)
     gl.uniform1f(u.u_opacity, 1.0)
 
+    const mix = this.#iconMix()
+    gl.uniform1f(u.u_iconMix, mix)
+    gl.uniform1f(u.u_iconSize, this.spec.iconSize ?? 17)
+    gl.uniform4fv(u.u_glyphUV, glyphUV(buildAtlas(), this.spec.glyph))
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, PointsLayer.#atlasTexture)
+    gl.uniform1i(u.u_atlas, 0)
+
     gl.enable(gl.BLEND)
-    gl.blendFunc(
-      gl.SRC_ALPHA,
-      (this.spec.blend ?? 'additive') === 'additive' ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA,
-    )
+    // Additive is right for a field of energy and wrong for a silhouette: under
+    // ONE the near-black rim adds nothing, so the shape loses the edge that makes
+    // it readable, and overlapping marks wash to white. An additive layer
+    // therefore switches to normal blending once the glyph dominates.
+    const additive = (this.spec.blend ?? 'additive') === 'additive' && mix < 0.5
+    gl.blendFunc(gl.SRC_ALPHA, additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA)
     // Points are billboards with no meaningful depth against each other, and
     // under globe projection gl_Position.z carries a horizon distance rather
     // than a depth — testing it against the depth buffer would be nonsense.

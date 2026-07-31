@@ -46,6 +46,20 @@ the fold, so a visitor could reasonably conclude the map had no maritime or avia
 four analysis panels were `display: none` under 1180px, so the planner's own EXPLAIN output was
 invisible on an ordinary laptop.
 
+**Every layer draws its own mark.** A coloured disc says something is here and
+nothing else — which colour meant aircraft and which meant vessels was a fact you
+had to carry back from the legend. Layers now draw a plane, a ship, an anchor, a
+storm cloud, a flame, a warning triangle; twelve glyphs baked once into a texture
+at boot and sampled in the fragment shader, so the instance path from the WASM
+heap to `bufferSubData` is untouched and the cost is one texture bind per layer.
+
+Shapes are not always the right mark, so they are not always drawn. A sixteen-pixel
+silhouette is ten times the area of a dot, and three thousand of them at world zoom
+overlap into a sheet. Each layer therefore declares the zoom at which its glyph
+takes over from its dot, blended over one zoom level, tuned to how dense that layer
+actually is — seismic holds its dots until 5.5, chokepoints show their shape at 2.
+The legend shows the same glyph, read from the same atlas the shader samples.
+
 **Navigation is an icon rail and one dock.** One panel open at a time, because the map is the document
 and a panel is something you deliberately opened. Each layer collapses to a single row — name, live
 count, checkbox — with its colour legend, its feeds, its refresh cadence and its coverage caveats

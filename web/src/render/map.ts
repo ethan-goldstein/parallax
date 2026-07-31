@@ -416,6 +416,18 @@ export class Globe {
       map.on('styledata', attach)
     }
 
+    // Every layer needs the zoom to decide between a dot and a glyph, and
+    // `zoom` fires for the whole of a pinch as well as for a wheel notch. Pushed
+    // here rather than read inside render(), so the layers stay ignorant of the
+    // map object.
+    const pushZoom = (): void => {
+      const z = map.getZoom()
+      for (const layer of this.#layers.values()) layer.setZoom(z)
+    }
+    map.on('zoom', pushZoom)
+    map.on('move', pushZoom)
+    pushZoom()
+
     map.on('render', () => {
       // The guarantee. `render` fires for as long as the map exists and cannot
       // be missed the way a one-shot event can, so attachment is retried here

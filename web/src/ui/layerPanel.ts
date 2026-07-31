@@ -27,6 +27,7 @@
 // toggle, because it gets keyboard operation and the open/closed state for free,
 // and because find-in-page can reach into a closed one.
 // ────────────────────────────────────────────────────────────────────────────
+import { glyphDataUrl } from '../render/icons'
 import type { LayerDef } from '../sources/spec'
 import { type Category, type FeedStatus } from '../sources/spec'
 
@@ -70,10 +71,21 @@ function legend(layer: LayerDef): string {
     ? 'uniform — units not comparable'
     : `${escapeHtml(readable(layer.scalarAttr))} ${rampLow} → ${rampHigh}`
 
+  // The mark itself, from the same atlas the shader samples — so the panel and
+  // the map cannot disagree about what a ship looks like.
+  const url = glyphDataUrl(layer.visual.glyph)
+  const mark = url
+    ? `<img class="layer-glyph" src="${url}" alt="" width="16" height="16" />`
+    : '<span class="layer-glyph"></span>'
+
+  const at = layer.visual.iconMinZoom ?? 4
+  const shown = url ? `<div class="layer-key layer-key-zoom">shape from zoom ${at}; a dot below it</div>` : ''
+
   return `<div class="layer-key">
+      ${mark}
       <span class="layer-ramp" style="${swatch}"></span>
       <span>${caption}</span>
-    </div>`
+    </div>${shown}`
 }
 
 export interface LayerPanelOptions {
