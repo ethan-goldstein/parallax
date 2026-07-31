@@ -241,6 +241,15 @@ Plan plan_query(const Query& q, const PlanContext& ctx, const CostModel& cost) {
   }
 
   if (!q.order_by.empty()) {
+    // An unknown ordering field is a plan error, not a silent pass-through.
+    // `where` can defensibly treat an unknown field as matching nothing, but a
+    // Sort node that appears in EXPLAIN without ordering anything is the exact
+    // failure this executor was fixed to stop producing.
+    if (!ctx.store->symbols().find(q.order_by).valid()) {
+      plan.error = "unknown field in order by: " + q.order_by;
+      return plan;
+    }
+
     PlanNode s{};
     s.op = PlanOp::Sort;
     s.child = node;
@@ -392,8 +401,18 @@ void execute(Plan& plan, const PlanContext& ctx, const Query& q, std::vector<Fac
   // ── group by entity ───────────────────────────────────────────────────────
   // Predicates are per-entity, not per-fact: "magnitude > 6" is a statement
   // about a quake, and the position and magnitude live in different rows.
-  std::vector<EntityId> order;
   std::vector<std::pair<EntityId, std::vector<std::pair<SymbolId, Value>>>> grouped;
+
+  // Latest valid_from across each entity's visible facts, parallel to `grouped`.
+  // Carried here rather than recomputed in the `since` filter because grouping
+  // is the only pass that still holds the FactId — `grouped` keeps values, and
+  // a Value cannot tell you when it became true.
+  std::vector<Timestamp> group_latest;
+
+  // The geometry facts each entity contributes, in candidate order. Collected
+  // here so the emit loop can walk entities in whatever order the sort chose
+  // instead of re-scanning candidates in fact order.
+  std::vector<std::vector<FactId>> group_geo;
   {
     std::vector<u32> slot;  // entity index -> position in `grouped`, or U32_MAX
     for (const FactId f : candidates) {
@@ -402,8 +421,13 @@ void execute(Plan& plan, const PlanContext& ctx, const Query& q, std::vector<Fac
       if (slot[e.index()] == 0xFFFF'FFFFu) {
         slot[e.index()] = static_cast<u32>(grouped.size());
         grouped.emplace_back(e, std::vector<std::pair<SymbolId, Value>>{});
+        group_latest.push_back(kTimeMin);
+        group_geo.emplace_back();
       }
-      grouped[slot[e.index()]].second.emplace_back(store.fact_attr(f), store.fact_value(f));
+      const u32 g = slot[e.index()];
+      grouped[g].second.emplace_back(store.fact_attr(f), store.fact_value(f));
+      group_latest[g] = std::max(group_latest[g], store.fact_valid_from(f));
+      if (store.fact_attr(f) == plan.geo_attr) group_geo[g].push_back(f);
     }
   }
 
@@ -413,12 +437,15 @@ void execute(Plan& plan, const PlanContext& ctx, const Query& q, std::vector<Fac
     if (plan.nodes[i].op == PlanOp::Filter) filter_idx = i;
   }
 
-  std::vector<EntityId> passing;
+  // Group indices, not EntityIds — the sort below needs to reach back into
+  // `grouped` for the ordering key, and an EntityId cannot find its own row.
+  std::vector<u32> passing;
   {
     f64 filter_us = 0;
     {
       ScopedTimer t(filter_us);
-      for (const auto& [entity, attrs] : grouped) {
+      for (u32 gi = 0; gi < grouped.size(); ++gi) {
+        const auto& attrs = grouped[gi].second;
         const EvalContext ec{&store, &q, &attrs};
         if (q.filter_root != kNoNode && !eval_node(ec, q.filter_root)) continue;
 
@@ -439,16 +466,17 @@ void execute(Plan& plan, const PlanContext& ctx, const Query& q, std::vector<Fac
           if (!near) continue;
         }
 
-        if (plan.has_since) {
-          bool recent = false;
-          for (const auto& [attr, val] : attrs) {
-            (void)val;
-            if (attr == plan.geo_attr) recent = true;
-          }
-          if (!recent) continue;
-        }
+        // `since` is a predicate on valid time — "what happened in the last six
+        // hours", not "what did we learn in the last six hours". The system axis
+        // already answers the second question and the scrubber is how you ask it.
+        //
+        // An entity passes if ANY of its visible facts became true at or after
+        // the bound, so a quake whose magnitude was revised inside the window
+        // stays in it. Taking only the geometry fact would drop exactly the
+        // revisions this engine exists to show.
+        if (plan.has_since && group_latest[gi] < plan.since) continue;
 
-        passing.push_back(entity);
+        passing.push_back(gi);
       }
     }
     if (filter_idx != kNoNode) {
@@ -458,21 +486,69 @@ void execute(Plan& plan, const PlanContext& ctx, const Query& q, std::vector<Fac
     }
   }
 
-  // ── emit the geometry facts for the passing entities ─────────────────────
-  std::vector<u8> keep;
-  for (const EntityId e : passing) {
-    if (e.index() >= keep.size()) keep.resize(e.index() + 1, 0);
-    keep[e.index()] = 1;
+  // ── order by ──────────────────────────────────────────────────────────────
+  // `limit` executes in the emit loop below, so an unordered `limit 20` returns
+  // an arbitrary twenty. That makes the sort a correctness requirement rather
+  // than a presentation nicety, and it is why it runs here — before the limit —
+  // rather than over the emitted rows.
+  //
+  // Entities missing the ordering attribute sort last in BOTH directions. They
+  // are not smaller than every value and not larger than every value; they are
+  // absent, and putting them at the end is the only ordering that does not
+  // claim otherwise.
+  if (!q.order_by.empty()) {
+    u32 sort_idx = kNoNode;
+    for (u32 i = 0; i < plan.nodes.size(); ++i) {
+      if (plan.nodes[i].op == PlanOp::Sort) sort_idx = i;
+    }
+
+    f64 sort_us = 0;
+    {
+      ScopedTimer t(sort_us);
+      const SymbolId key = store.symbols().find(q.order_by);
+
+      std::vector<f64> sort_key(grouped.size(), 0.0);
+      std::vector<u8> has_key(grouped.size(), 0);
+      for (const u32 gi : passing) {
+        if (!key.valid()) break;
+        for (const auto& [attr, val] : grouped[gi].second) {
+          f64 d = 0;
+          if (attr == key && value_as_double(val, d)) {
+            sort_key[gi] = d;
+            has_key[gi] = 1;
+            break;
+          }
+        }
+      }
+
+      // stable_sort so entities that tie keep their arrival order — a sort that
+      // reshuffles equal rows between refreshes makes the map flicker.
+      std::stable_sort(passing.begin(), passing.end(), [&](u32 a, u32 b) {
+        if (has_key[a] != has_key[b]) return has_key[a] > has_key[b];
+        if (!has_key[a]) return false;
+        return q.order_desc ? sort_key[a] > sort_key[b] : sort_key[a] < sort_key[b];
+      });
+    }
+
+    if (sort_idx != kNoNode) {
+      plan.nodes[sort_idx].actual_us = sort_us;
+      plan.nodes[sort_idx].actual_rows = static_cast<u32>(passing.size());
+      plan.nodes[sort_idx].rows_examined = static_cast<u32>(passing.size());
+    }
   }
 
+  // ── emit the geometry facts for the passing entities ─────────────────────
+  // Walks entities rather than re-scanning candidates, because the sort above
+  // ordered entities and a fact-order scan would silently discard that. It also
+  // makes `limit 20` mean twenty entities instead of twenty geometry rows.
   u32 emitted = 0;
-  for (const FactId f : candidates) {
+  for (const u32 gi : passing) {
     if (plan.limit > 0 && emitted >= plan.limit) break;
-    if (store.fact_attr(f) != plan.geo_attr) continue;
-    const EntityId e = store.fact_entity(f);
-    if (e.index() >= keep.size() || keep[e.index()] == 0) continue;
-    out.push_back(f);
-    ++emitted;
+    for (const FactId f : group_geo[gi]) {
+      if (plan.limit > 0 && emitted >= plan.limit) break;
+      out.push_back(f);
+      ++emitted;
+    }
   }
 
   for (u32 i = 0; i < plan.nodes.size(); ++i) {

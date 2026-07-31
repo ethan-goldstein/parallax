@@ -28,8 +28,9 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
 import type { FactInput } from '../engine/engine'
-import type { Batch, EntityRegistry } from './usgs'
+import type { Batch, EntityRegistry } from './batch'
 import { SOURCES } from './registry'
+import { Sensitivity, type SourceSpec } from './spec'
 
 export const DIGITRAFFIC_AIS_URL = 'https://meri.digitraffic.fi/api/ais/v1/locations'
 
@@ -193,4 +194,36 @@ export function buildVesselBatches(
 
       return { wallClockUnix: bucket, facts }
     })
+}
+
+// ── source spec ─────────────────────────────────────────────────────────────
+
+/**
+ * Digitraffic AIS.
+ *
+ * `vessel_position` is typed Precise: it locates a specific, identifiable asset,
+ * where a quake epicentre locates an event. That one difference is what makes
+ * the policy engine's refusal table meaningful — the identical 50 m radius is
+ * declined for vessels and permitted for earthquakes.
+ */
+export const digitrafficSpec: SourceSpec<VesselFetch> = {
+  id: SOURCES.digitraffic!.id,
+  key: 'digitraffic',
+  label: 'maritime · digitraffic',
+  layer: 'maritime',
+  coverageNote: 'Baltic and Gulf of Finland only, not global',
+  attributes: [
+    { name: 'vessel_position', sensitivity: Sensitivity.Precise },
+    { name: 'speed', sensitivity: Sensitivity.Public },
+  ],
+  fetch: (signal) => fetchVessels(DIGITRAFFIC_AIS_URL, signal),
+  normalize(raw, ctx) {
+    return {
+      batches: buildVesselBatches(raw.vessels, ctx.registry, {
+        position: ctx.attrs.vessel_position!,
+        speed: ctx.attrs.speed!,
+      }),
+      count: raw.vessels.length,
+    }
+  },
 }

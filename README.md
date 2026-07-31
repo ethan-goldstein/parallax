@@ -53,7 +53,7 @@ engine/                  C++20. No emscripten, no I/O, no renderer. Bytes in, by
         └── native/        → px_cli, px_bench benchmarks and reference outputs
 ```
 
-**One codebase, two targets.** The native build is what makes the tests meaningful — 110 test cases
+**One codebase, two targets.** The native build is what makes the tests meaningful — 123 test cases
 and 48,000+ assertions run under AddressSanitizer and UndefinedBehaviorSanitizer on every push, which
 is not possible in a browser.
 
@@ -121,8 +121,8 @@ engine's advantage over a JS implementation was never going to be this loop — 
 
 - the **indexes that avoid running the scan at all** — zone maps skipping 245 of 245 chunks for a
   query before the data begins, a Morton range scan touching 44 rows instead of 9,421
-- the **zero-copy path** from store to GPU: the renderer points `InstancedBufferAttribute` directly at
-  engine memory, so no per-entity JavaScript object is ever allocated
+- the **zero-copy path** from store to GPU: the renderer hands a `Float32Array` view over the WASM
+  heap straight to `bufferSubData`, so no per-entity JavaScript object is ever allocated
 - the **algorithms** — entity resolution, graph traversal, cost-based planning — that would be
   genuinely painful to write against typed arrays
 
@@ -231,9 +231,37 @@ fetch time, and license.
 | [USGS](https://earthquake.usgs.gov/earthquakes/feed/) | US public domain | seismic events |
 | [EMSC](https://www.seismicportal.eu/) | open, attribution requested | seismic events (the ER counterparty) |
 | [Digitraffic](https://www.digitraffic.fi/en/marine-traffic/) | CC BY 4.0 | AIS vessel positions, Baltic |
+| [GDACS](https://www.gdacs.org/) | EC public sector info, attribution | disaster alerts — carries its own revision axis |
+| [NASA EONET](https://eonet.gsfc.nasa.gov/) | US public domain | wildfires, volcanoes, storms, ice |
+| [NOAA SWPC](https://www.swpc.noaa.gov/) | US public domain | OVATION aurora forecast — the only source above the diagonal |
+| [airplanes.live](https://airplanes.live/) | community terms, non-commercial | military ADS-B, global |
+| [OpenFreeMap](https://openfreemap.org/) | ODbL (OpenStreetMap) | vector basemap — no key, no rate limit |
+| [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) | US public domain | LIVE basemap — today's imagery, 250 m |
+| [Sentinel-2 cloudless](https://s2maps.eu/) | CC BY-NC-SA 4.0 | SATELLITE basemap — 10 m, EOX IT Services GmbH |
 
-Both temporal axes come from the data itself: USGS and EMSC publish `updated` / `lastupdate`
-separately from event time, and that is the system axis. Nothing is simulated, dripped in on a timer,
+The basemaps are sources like any other and go through the same licence registry.
+
+Sentinel-2 cloudless is CC BY-NC-SA, and that was initially reason enough to leave it out: share-alike
+on a basemap is worse than on a data layer, because the basemap sits under every screenshot and every
+exported result, so its obligations would attach to everything. What resolves that is not the licence
+changing but the basemap being **opt-in**. DARK is the default and carries only ODbL; selecting
+SATELLITE is a deliberate act, and the obligations panel gains the non-commercial and share-alike
+terms the moment it is. An obligation you are shown when you incur it is handled; one you avoid by
+refusing the capability is only avoided.
+
+The three basemaps answer different questions. DARK is the operational default. SATELLITE is
+Sentinel-2 at 10 m, which is where imagery becomes a map of the ground rather than a texture. LIVE is
+NASA GIBS — coarse at 250 m, but it is *today*, so cloud, smoke plumes and dust are visible, which a
+static mosaic cannot show. Imagery is inserted below the road and label layers, so both imagery modes
+are hybrids: the ground with the street network still drawn on it.
+
+Both temporal axes come from the data itself. USGS and EMSC publish `updated` / `lastupdate`
+separately from event time, and GDACS publishes `datemodified` separately from `fromdate` — those are
+the system axis. NOAA's aurora model is the inverse and the only source here that reaches the region
+*above* the scrubber's diagonal: it reports an `Observation Time` and a `Forecast Time` roughly eighty
+minutes later, so the fact is asserted before the interval it describes. AIS and ADS-B carry a single
+report time and therefore sit exactly on the diagonal; EONET publishes no revision field at all, so
+ingest time is its system axis and it does too. Where a source has no second axis, none is invented. Nothing is simulated, dripped in on a timer,
 or bucketed by event time to manufacture motion. **If a revision is not in the data, it does not go on
 the axis.**
 
@@ -260,8 +288,11 @@ Restraint is a design requirement here, not an afterthought:
   publish no multiplier. The scan is memory-bound and JS does tight typed-array loops well.
 - **Graph analytics are built and tested but not wired to the UI.** CSR, k-hop, bidirectional
   shortest path, label propagation and components all pass tests; nothing on screen uses them yet.
-- **`order by` and `since` parse and plan but do not execute.** The plan node appears in EXPLAIN; it
-  does not reorder or filter.
+- **`order by` and `since` execute as of Phase 9.** They previously parsed and planned without
+  running, which was worse than unimplemented: `since` tested a condition true for every entity
+  with geometry, so it filtered nothing while EXPLAIN displayed a `since` node above the unfiltered
+  result. Because `limit` did execute, an unordered `limit 20` also returned an arbitrary twenty.
+  Both now run, and `tests/test_plan.cpp` fails against the old behaviour.
 - **No provenance "peel" interaction or export license-conflict panel.** The data is all there — every
   fact carries a `SourceId`, and the registry has share-alike and non-commercial flags — but the
   interaction is not built.

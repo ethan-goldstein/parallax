@@ -26,7 +26,8 @@
 import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
 import type { FactInput } from '../engine/engine'
 import { SOURCES } from './registry'
-import type { Batch, EntityRegistry } from './usgs'
+import type { Batch, EntityRegistry } from './batch'
+import { Sensitivity, type SourceSpec } from './spec'
 
 export const EMSC_URL =
   'https://seismicportal.eu/fdsnws/event/1/query?limit=800&format=json&orderby=time'
@@ -201,4 +202,39 @@ export function buildEmscBatches(
 
       return { wallClockUnix: bucket, facts }
     })
+}
+
+// ── source spec ─────────────────────────────────────────────────────────────
+
+/**
+ * EMSC feeds the SAME `seismic` layer and the SAME `position` attribute as USGS.
+ *
+ * That is the point, not an oversight. Both agencies locate the same quakes with
+ * different station networks, different magnitude scales and different ids, and
+ * nothing joins them. Sharing the attribute is what creates the duplicate
+ * problem the entity resolver solves; namespacing them apart would hide it.
+ */
+export const emscSpec: SourceSpec<{ events: EmscEvent[]; rejected: number }> = {
+  id: SOURCES.emsc!.id,
+  key: 'emsc',
+  label: 'seismic · emsc',
+  layer: 'seismic',
+  attributes: [
+    { name: 'position', sensitivity: Sensitivity.Public },
+    { name: 'magnitude', sensitivity: Sensitivity.Public },
+    { name: 'depth', sensitivity: Sensitivity.Public },
+    { name: 'region', sensitivity: Sensitivity.Public },
+  ],
+  fetch: (signal) => fetchEmsc(EMSC_URL, signal),
+  normalize(raw, ctx) {
+    return {
+      batches: buildEmscBatches(raw.events, ctx.registry, {
+        position: ctx.attrs.position!,
+        magnitude: ctx.attrs.magnitude!,
+        depth: ctx.attrs.depth!,
+        region: ctx.attrs.region!,
+      }),
+      count: raw.events.length,
+    }
+  },
 }

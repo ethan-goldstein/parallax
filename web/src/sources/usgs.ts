@@ -33,6 +33,10 @@
 // ────────────────────────────────────────────────────────────────────────────
 import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
 import type { FactInput } from '../engine/engine'
+import type { Batch } from './batch'
+import { EntityRegistry } from './batch'
+import { SOURCES } from './registry'
+import { Sensitivity, type SourceSpec } from './spec'
 
 export const USGS_FEEDS = {
   hour: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson',
@@ -83,11 +87,6 @@ export interface FetchResult {
 /**
  * A batch of facts sharing one system time — one transaction.
  */
-export interface Batch {
-  wallClockUnix: number
-  facts: FactInput[]
-}
-
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v)
 }
@@ -167,29 +166,6 @@ export async function fetchQuakes(
  * take the tab down. Sequential ids keep that array exactly as large as the
  * number of distinct entities.
  */
-export class EntityRegistry {
-  #ids = new Map<string, number>()
-  #next = 0
-
-  idFor(key: string): number {
-    let id = this.#ids.get(key)
-    if (id === undefined) {
-      id = this.#next++
-      this.#ids.set(key, id)
-    }
-    return id
-  }
-
-  get size(): number {
-    return this.#next
-  }
-
-  labelOf(entity: number): string | undefined {
-    for (const [k, v] of this.#ids) if (v === entity) return k
-    return undefined
-  }
-}
-
 export interface AttrIds {
   position: number
   magnitude: number
@@ -276,4 +252,37 @@ export function buildBatches(
 
     return { wallClockUnix: bucket, facts }
   })
+}
+
+// ── source spec ─────────────────────────────────────────────────────────────
+
+/**
+ * USGS as a registered source.
+ *
+ * `position` is typed Public because an earthquake has no privacy interest, and
+ * a policy engine that pretended otherwise would be theatre — the refusal table
+ * in the README turns on exactly this asymmetry against vessel positions.
+ */
+export const usgsSpec: SourceSpec<FetchResult> = {
+  id: SOURCES.usgs!.id,
+  key: 'usgs',
+  label: 'seismic · usgs',
+  layer: 'seismic',
+  attributes: [
+    { name: 'position', sensitivity: Sensitivity.Public },
+    { name: 'magnitude', sensitivity: Sensitivity.Public },
+    { name: 'depth', sensitivity: Sensitivity.Public },
+  ],
+  fetch: (signal) => fetchQuakes(USGS_FEEDS.week, signal),
+  normalize(raw, ctx) {
+    const attrs = {
+      position: ctx.attrs.position!,
+      magnitude: ctx.attrs.magnitude!,
+      depth: ctx.attrs.depth!,
+    }
+    return {
+      batches: buildBatches(raw.quakes, ctx.registry, attrs, SOURCES.usgs!.id),
+      count: raw.quakes.length,
+    }
+  },
 }

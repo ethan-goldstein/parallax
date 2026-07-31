@@ -88,6 +88,46 @@ export const SOURCES: Record<string, SourceMeta> = {
     nonCommercial: true,
     typicalMs: 600,
   },
+
+  eonet: {
+    id: 4,
+    key: 'eonet',
+    name: 'NASA EONET — Earth Observatory Natural Event Tracker',
+    url: 'https://eonet.gsfc.nasa.gov/',
+    license: 'Public domain (US Government work)',
+    spdx: 'CC-PDDC',
+    attribution: 'NASA Earth Observatory Natural Event Tracker',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 700,
+  },
+
+  gdacs: {
+    id: 5,
+    key: 'gdacs',
+    name: 'GDACS — Global Disaster Alert and Coordination System',
+    url: 'https://www.gdacs.org/',
+    // EC reuse policy: free reuse with attribution, commercial included.
+    license: 'EC public sector information, attribution required',
+    spdx: 'NOASSERTION',
+    attribution: 'GDACS — European Commission JRC and UN OCHA',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 1200,
+  },
+
+  swpc: {
+    id: 6,
+    key: 'swpc',
+    name: 'NOAA Space Weather Prediction Center — OVATION aurora model',
+    url: 'https://www.swpc.noaa.gov/',
+    license: 'Public domain (US Government work)',
+    spdx: 'CC-PDDC',
+    attribution: 'NOAA Space Weather Prediction Center',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 1500,
+  },
 }
 
 export const SOURCE_BY_ID: SourceMeta[] = Object.values(SOURCES).sort((a, b) => a.id - b.id)

@@ -80,11 +80,7 @@
   backdrop-filter: blur(6px);
 }
 
-.readout {
-  top: 84px;
-  right: var(--s-6);
-  width: 15rem;
-}
+
 
 .row {
   display: flex;
@@ -188,12 +184,7 @@
 
 /* ── layer panel ─────────────────────────────────────────────────────────── */
 
-.layers {
-  top: 84px;
-  left: var(--s-6);
-  width: 12rem;
-  pointer-events: auto;
-}
+
 
 .layer-row {
   display: grid;
@@ -322,20 +313,7 @@
 
 /* ── EXPLAIN viewer ──────────────────────────────────────────────────────── */
 
-.explain {
-  position: fixed;
-  right: var(--s-6);
-  bottom: 190px;
-  width: 27rem;
-  max-height: 42vh;
-  overflow-y: auto;
-  z-index: 3;
-  pointer-events: auto;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(8px);
-}
+
 
 .explain:empty {
   display: none;
@@ -466,20 +444,7 @@
 
 /* ── merge evidence ──────────────────────────────────────────────────────── */
 
-.evidence {
-  position: fixed;
-  left: var(--s-6);
-  bottom: 190px;
-  width: 25rem;
-  max-height: 46vh;
-  overflow-y: auto;
-  z-index: 3;
-  pointer-events: auto;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(8px);
-}
+
 
 .evidence:empty {
   display: none;
@@ -718,20 +683,7 @@
 
 /* ── audit trail ─────────────────────────────────────────────────────────── */
 
-.audit {
-  position: fixed;
-  right: var(--s-6);
-  top: 84px;
-  width: 22rem;
-  max-height: 30vh;
-  overflow-y: auto;
-  z-index: 3;
-  pointer-events: auto;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(8px);
-}
+
 
 .audit:empty {
   display: none;
@@ -815,21 +767,7 @@
 
 /* ── benchmark panel ─────────────────────────────────────────────────────── */
 
-.bench {
-  position: fixed;
-  left: var(--s-6);
-  /* Below the layer panel, which is also pinned left at 84px. Both at the same
-     top coordinate stacked the benchmark button on top of the layer rows. */
-  top: 212px;
-  width: 20rem;
-  z-index: 3;
-  pointer-events: auto;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(8px);
-  font-size: var(--fs-micro);
-}
+
 
 .bench-run {
   display: block;
@@ -936,4 +874,292 @@
   color: var(--ink-dim);
   border-top: 1px solid var(--rule);
   padding-top: var(--s-2);
+}
+
+/* ── layer panel groups ─────────────────────────────────────────────────────
+   Rows are grouped by category so fifteen layers stay scannable. The group
+   title is the only chrome added; anything more competes with the data. */
+.layer-group + .layer-group {
+  margin-top: var(--s-3);
+}
+
+.layer-group-title {
+  padding: var(--s-2) var(--s-3) var(--s-1);
+  opacity: 0.55;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Rows spanning a coverage note need a fourth grid line. */
+.layer-row {
+  grid-template-columns: auto 1fr auto;
+  grid-auto-rows: min-content;
+}
+
+.layer-note {
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+  opacity: 0.5;
+  padding-left: var(--s-4);
+}
+
+/* A source feeding a layer another source already owns the checkbox for. It is
+   listed because two agencies feeding one layer is the setup for the entity
+   resolution panel — but it gets a marker, not a second control that would
+   desync from the first. */
+.layer-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.45;
+  justify-self: center;
+}
+
+
+/* ── rails ───────────────────────────────────────────────────────────────────
+   Panels used to be individually `position: fixed` with hand-picked top/bottom
+   offsets. That works for three panels and collides for eight: the layer list
+   was being covered by the benchmark button, the evidence panel ran straight
+   through the scrubber, and four data sources were unreachable because the
+   panel they lived in had no height to scroll in.
+
+   Two rails now own placement. Panels inside them are in normal flow, so they
+   stack instead of overlapping, and each rail scrolls independently when its
+   contents outgrow the viewport.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --rail-top: 84px;
+  /* scrubber (140) + attribution + padding */
+  --rail-bottom: 196px;
+  --rail-left-w: 15.5rem;
+  --rail-right-w: 19rem;
+}
+
+.rail {
+  position: fixed;
+  top: var(--rail-top);
+  bottom: var(--rail-bottom);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+
+.rail::-webkit-scrollbar { width: 6px; }
+.rail::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+
+.rail-left {
+  left: var(--s-6);
+  width: var(--rail-left-w);
+}
+
+.rail-right {
+  right: var(--s-6);
+  width: var(--rail-right-w);
+}
+
+/* Panels no longer position themselves. */
+.rail > .panel {
+  position: static;
+  flex: 0 0 auto;
+  width: 100%;
+  max-height: none;
+}
+
+/* An empty analysis panel takes no space rather than leaving a gap. */
+.rail > .panel:empty { display: none; }
+
+.panel-title {
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+  opacity: 0.6;
+  letter-spacing: 0.08em;
+}
+
+/* EXPLAIN and the audit log can be long; cap them so one panel cannot push
+   everything else out of reach. */
+#explain, #audit, #evidence {
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.obligations .obligation {
+  display: block;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+.obligations .obligation:last-child { border-bottom: none; }
+
+.bench { padding: var(--s-2); }
+.bench-run { width: 100%; }
+
+/* ── map controls ────────────────────────────────────────────────────────── */
+
+.map-controls {
+  position: fixed;
+  left: 50%;
+  /* Above MapLibre's attribution row, which shares this band and must stay
+     legible — it is a licence obligation, not decoration. */
+  bottom: calc(var(--rail-bottom) + 42px);
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  gap: var(--s-3);
+  pointer-events: auto;
+}
+
+.seg {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.seg button {
+  padding: var(--s-2) var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-hud);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  border-right: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.seg button:last-child { border-right: none; }
+.seg button:hover { color: var(--ink); }
+
+.seg button.on {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+/* ── layer panel, rebuilt ────────────────────────────────────────────────── */
+
+.layer-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3) var(--s-1);
+  cursor: pointer;
+}
+
+.layer-head input { accent-color: var(--accent); margin: 0; }
+
+.layer-head .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-small);
+}
+
+/* The legend. Without it the map is coloured dots with no stated meaning. */
+.layer-key {
+  display: grid;
+  grid-template-columns: 2.6rem 1fr;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-3) var(--s-2);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+.layer-ramp {
+  height: 6px;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+}
+
+.layer-src {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  padding: 1px var(--s-3) 1px calc(var(--s-3) + var(--s-4));
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+.layer-src.dead { opacity: 0.6; }
+.layer-src .bad { color: var(--deny); }
+
+.layer-note {
+  padding: 0 var(--s-3) var(--s-2) calc(var(--s-3) + var(--s-4));
+  font-size: var(--fs-micro);
+  opacity: 0.45;
+  line-height: 1.4;
+}
+
+.layer-block + .layer-block { border-top: 1px solid var(--rule); }
+
+.layer-group-title {
+  padding: var(--s-2) var(--s-3) var(--s-1);
+  opacity: 0.5;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+
+/* ── footer ──────────────────────────────────────────────────────────────── */
+
+.attribution {
+  justify-content: flex-end;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 1100px) {
+  :root { --rail-left-w: 13rem; --rail-right-w: 15rem; }
+  .query-bar { width: min(30rem, calc(100vw - 32rem)); }
+}
+
+@media (max-width: 820px) {
+  .rail { position: static; width: auto; }
+}
+
+
+/* ── MapLibre's own controls ─────────────────────────────────────────────────
+   They anchor to the canvas, which is the full viewport, so by default they sit
+   underneath the scrubber footer. Lift them to just above it. Attribution is a
+   licence obligation and must stay legible, not merely present. */
+
+/* Inset past the rails as well as up past the footer — the canvas is the whole
+   viewport, so "bottom right" is underneath two panels by default. */
+.maplibregl-ctrl-bottom-right {
+  bottom: calc(var(--rail-bottom) + var(--s-2));
+  right: calc(var(--rail-right-w) + var(--s-6) + var(--s-3));
+  z-index: 3;
+}
+
+.maplibregl-ctrl-bottom-left {
+  bottom: calc(var(--rail-bottom) + var(--s-2));
+  left: calc(var(--rail-left-w) + var(--s-6) + var(--s-3));
+  z-index: 3;
+}
+
+.maplibregl-ctrl-attrib {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  background: color-mix(in srgb, var(--panel) 92%, transparent) !important;
+  color: var(--ink-dim);
+}
+
+.maplibregl-ctrl-attrib a { color: var(--ink-dim); }
+
+/* The engine tag moves left so it cannot collide with the attribution block. */
+.hud-bottom .attribution {
+  justify-content: flex-start;
 }

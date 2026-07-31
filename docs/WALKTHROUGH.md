@@ -274,8 +274,10 @@ cost model work, not to compete with an engine that has had a hundred engineer-y
 and the README says so rather than implying more.
 
 **"What would you do next?"** In order: wire the graph module to the UI (built and tested, unused);
-execute `order by` and `since` rather than only planning them; histograms so scalar selectivity stops
-being a 1/3 guess; snapshot persistence so a reload doesn't re-fetch.
+histograms so scalar selectivity stops being a 1/3 guess; snapshot persistence so a reload doesn't
+re-fetch. `order by` and `since` were the top of this list and now execute — `since` was the worse of
+the two, because it had been filtering nothing while EXPLAIN displayed a `since` node above the
+unfiltered result.
 
 **"What's the weakest part?"** The cost model constants are unvalidated — `seek = 30 × row_scan` is
 an educated guess, not a calibration. It happens to pick the right plans on this data; I have not

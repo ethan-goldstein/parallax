@@ -39,6 +39,7 @@ enum class Tok : u8 {
   Tilde,  // ~  substring match
 
   Minus,  // - relative time, and negative numbers
+  Plus,   // + relative time into the future — see parse_temporal
 };
 
 struct Token {

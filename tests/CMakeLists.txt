@@ -34,6 +34,7 @@ add_executable(px_tests
   test_arena.cpp
   test_er.cpp
   test_geo.cpp
+  test_graph.cpp
   test_plan.cpp
   test_policy.cpp
   test_ql.cpp

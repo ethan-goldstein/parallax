@@ -82,6 +82,14 @@ std::vector<Token> tokenize(std::string_view src) {
       continue;
     }
 
+    // '+' exists only for forward relative time. There is no addition operator
+    // in this language, so it never has to be disambiguated the way '-' does.
+    if (c == '+') {
+      push(Tok::Plus, i, i + 1);
+      ++i;
+      continue;
+    }
+
     if (std::isdigit(static_cast<unsigned char>(c)) != 0) {
       const usize begin = i;
       while (i < n && (std::isdigit(static_cast<unsigned char>(src[i])) != 0)) ++i;

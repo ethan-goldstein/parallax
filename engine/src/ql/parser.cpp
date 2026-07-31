@@ -1,5 +1,6 @@
 #include "px/ql/parser.hpp"
 
+#include <cmath>
 #include <string>
 
 #include "px/ql/lexer.hpp"
@@ -286,9 +287,17 @@ class Parser {
   TemporalClause parse_temporal() {
     TemporalClause t;
 
-    if (eat(Tok::Minus)) {
+    // Forward offsets exist because forecasts do. NOAA's aurora model asserts a
+    // probability for an instant roughly eighty minutes ahead of the observation
+    // that produced it, so `as of +90m` is the only relative way to reach the
+    // region of the scrubber above the diagonal.
+    const bool forward = peek().kind == Tok::Plus;
+    if (forward || peek().kind == Tok::Minus) {
+      advance();
       if (peek().kind != Tok::Number) {
-        fail("expected a number after `-`, e.g. `-6h`", peek());
+        fail(forward ? "expected a number after `+`, e.g. `+90m`"
+                     : "expected a number after `-`, e.g. `-6h`",
+             peek());
         return t;
       }
       const f64 amount = advance().number;
@@ -312,9 +321,30 @@ class Parser {
         return t;
       }
 
+      // The amount is arbitrary user input, and `static_cast<i64>` of a double
+      // outside i64's range is undefined behaviour rather than merely a wrong
+      // answer — so it is bounded BEFORE the cast, not after.
+      //
+      // The limit is deliberately absurd: 1e12 weeks is longer than the age of
+      // the universe. Anything approaching it is a typo or an attack, not a
+      // query, and a refusal says so more usefully than a silently wrapped
+      // timestamp would.
+      //
+      // This was reachable before forward offsets existed — `as of -1e20h` hit
+      // the same cast. The parser fuzzer had not generated a twenty-digit
+      // number followed by a unit letter; a targeted run did so immediately.
+      constexpr f64 kMaxAmount = 1e12;
+      if (!std::isfinite(amount) || amount < 0.0 || amount > kMaxAmount) {
+        fail("time offset is out of range", unit_tok);
+        return t;
+      }
+
       t.present = true;
       t.relative = true;
-      t.relative_seconds = static_cast<i64>(amount) * seconds;
+      // resolve_time computes `now - relative_seconds`, so a forward offset is
+      // simply a negative one. Encoding it here keeps the planner ignorant of
+      // direction.
+      t.relative_seconds = static_cast<i64>(amount) * seconds * (forward ? -1 : 1);
       return t;
     }
 
@@ -332,7 +362,7 @@ class Parser {
       return t;
     }
 
-    fail("expected a time: a relative offset like `-6h` or a quoted ISO-8601 instant",
+    fail("expected a time: a relative offset like `-6h` or `+90m`, or a quoted ISO-8601 instant",
          peek());
     return t;
   }

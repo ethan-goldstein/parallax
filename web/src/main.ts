@@ -1,21 +1,28 @@
 // ── web/src/main.ts ─────────────────────────────────────────────────────────
-// Phase 4: two live feeds, one bitemporal store, two globe layers.
+// Wiring. Boots the engine, runs one ingest cycle, and binds the panels.
+//
+// Every feed, layer, attribute and sensitivity now comes from sources/index.ts.
+// Nothing about a specific source appears below this line — adding a feed does
+// not require touching this file.
 // ────────────────────────────────────────────────────────────────────────────
+import 'maplibre-gl/dist/maplibre-gl.css'
+
 import './ui/tokens.css'
+// After MapLibre's sheet, so the HUD's own tokens win where they overlap.
 import './ui/app.css'
 
-import { toTimestamp } from './engine/abi'
 import { bootEngine, EngineBootError } from './engine/boot'
 import { Engine } from './engine/engine'
-import { Globe } from './render/globe'
-import { fetchVessels, buildVesselBatches } from './sources/digitraffic'
-import { fetchEmsc, buildEmscBatches } from './sources/emsc'
+import { Globe, type Basemap, type ProjectionMode } from './render/map'
+import { LAYERS, layerForQuery } from './sources'
 import { licenseObligations, SOURCES } from './sources/registry'
-import { buildBatches, EntityRegistry, fetchQuakes, USGS_FEEDS, type Batch } from './sources/usgs'
+import { EntityRegistry } from './sources/batch'
+import { Ingestor, registerAttributes, registerQueryNames } from './state/ingest'
 import { renderAudit, type AuditLog } from './ui/audit'
 import { runBenchmark } from './ui/bench'
 import { renderEvidence, type MergeEvidence } from './ui/evidence'
 import { renderExplain, type ExplainPlan } from './ui/explain'
+import { renderLayerPanel, updateLayerCounts } from './ui/layerPanel'
 import { Scrubber } from './ui/scrubber'
 
 const MAX_POINTS = 262_144
@@ -40,33 +47,47 @@ app.innerHTML = `
           <option value="disaster-response">disaster response</option>
         </select>
       </label>
-      <div id="status" class="status hud-label">booting engine…</div>
+      <div id="status" class="status hud-label">booting engine\u2026</div>
     </div>
   </header>
 
   <div class="query-bar">
     <input id="query" class="query-input" spellcheck="false" autocomplete="off"
-           placeholder="earthquakes where magnitude > 4.5   —   press Enter" />
+           placeholder="earthquakes where magnitude > 4.5   \u2014   press Enter" />
     <div id="query-error" class="query-error" hidden></div>
     <div id="query-examples" class="query-examples"></div>
   </div>
 
-  <section id="explain" class="explain"></section>
-  <section id="evidence" class="evidence"></section>
-  <section id="audit" class="audit"></section>
-  <section id="bench" class="bench">
-    <button id="bench-run" class="bench-run" type="button">run benchmark on your machine</button>
-  </section>
+  <aside class="rail rail-left">
+    <section class="panel layers" id="layers"></section>
+    <section class="panel obligations" id="obligations"></section>
+  </aside>
 
-  <aside class="hud panel layers" id="layers"></aside>
-  <aside id="readout" class="hud panel readout" aria-live="polite"></aside>
+  <aside class="rail rail-right">
+    <section class="panel readout" id="readout" aria-live="polite"></section>
+    <section class="panel explain" id="explain"></section>
+    <section class="panel evidence" id="evidence"></section>
+    <section class="panel audit" id="audit"></section>
+    <section class="panel bench" id="bench">
+      <button id="bench-run" class="bench-run" type="button">run benchmark</button>
+    </section>
+  </aside>
+
+  <div class="map-controls">
+    <div class="seg" id="basemap-seg" role="group" aria-label="basemap">
+      <button type="button" data-basemap="dark" class="on">dark</button>
+      <button type="button" data-basemap="sat">satellite</button>
+      <button type="button" data-basemap="live">live</button>
+    </div>
+    <div class="seg" id="projection-seg" role="group" aria-label="projection">
+      <button type="button" data-projection="globe" class="on">3D</button>
+      <button type="button" data-projection="mercator">2D</button>
+    </div>
+  </div>
 
   <footer class="hud hud-bottom">
     <div id="scrubber-host" class="scrubber-host"></div>
-    <div class="attribution hud-label">
-      <span id="sources"></span>
-      <span id="engine-tag"></span>
-    </div>
+    <div class="attribution hud-label"><span id="engine-tag"></span></div>
   </footer>
 `
 
@@ -76,7 +97,7 @@ const readoutEl = document.querySelector<HTMLElement>('#readout')!
 const layersEl = document.querySelector<HTMLElement>('#layers')!
 const scrubberHost = document.querySelector<HTMLDivElement>('#scrubber-host')!
 const engineTag = document.querySelector<HTMLSpanElement>('#engine-tag')!
-const sourcesEl = document.querySelector<HTMLSpanElement>('#sources')!
+const sourcesEl = document.querySelector<HTMLElement>('#obligations')!
 
 function row(label: string, value: string, tone = ''): string {
   return `<div class="row"><span class="hud-label">${label}</span><span class="v ${tone}">${value}</span></div>`
@@ -87,15 +108,6 @@ function fail(message: string, err?: unknown): void {
   statusEl.classList.add('bad')
   readoutEl.innerHTML = row('error', message, 'bad')
   if (err) console.error('[parallax]', err)
-}
-
-/** A feed that failed is reported, never silently dropped. */
-interface FeedStatus {
-  key: string
-  label: string
-  layer: string
-  count: number
-  error?: string
 }
 
 async function main(): Promise<void> {
@@ -109,28 +121,12 @@ async function main(): Promise<void> {
     return
   }
 
-  const attrs = {
-    position: engine.intern('position'),
-    magnitude: engine.intern('magnitude'),
-    depth: engine.intern('depth'),
-    vesselPosition: engine.intern('vessel_position'),
-    speed: engine.intern('speed'),
-    region: engine.intern('region'),
-  }
-
-  // Bind query-language source names to the attributes that carry their
-  // geometry and scalar, so `earthquakes` and `vessels` mean different things
-  // to the planner.
-  engine.registerSource('earthquakes', attrs.position, attrs.magnitude)
-  engine.registerSource('quakes', attrs.position, attrs.magnitude)
-  engine.registerSource('vessels', attrs.vesselPosition, attrs.speed)
-  engine.registerSource('ships', attrs.vesselPosition, attrs.speed)
-
-  // A vessel's position locates a specific asset, so it is typed Precise.
-  // Seismic data is naturally public — an earthquake has no privacy interest,
-  // and a policy engine that pretended otherwise would be theatre.
-  engine.setSensitivity(attrs.vesselPosition, 1)
-  engine.setSensitivity(attrs.position, 0)
+  // Attributes, sensitivities and query-language names all come from the source
+  // registry now. Adding a feed is one file in sources/ plus one line in
+  // sources/index.ts — it is no longer possible to add one and forget to type
+  // its sensitivity, because the declaration is what interns it.
+  const attrs = registerAttributes(engine)
+  registerQueryNames(engine, attrs)
 
   const purposeSelect = document.querySelector<HTMLSelectElement>('#purpose')!
   purposeSelect.addEventListener('change', () => {
@@ -143,145 +139,40 @@ async function main(): Promise<void> {
   })
 
   const globe = new Globe({ container: stage, maxPoints: MAX_POINTS })
-  // Amber → red for seismic energy; teal for maritime. Teal is the valid-time
-  // colour, and vessel positions sit exactly on the scrubber's diagonal (see
-  // digitraffic.ts) — the colour is making that point, not decorating.
-  globe.addLayer('seismic', {
-    colorLow: 0xffb000,
-    colorHigh: 0xe5484d,
-    sizeBase: 0.006,
-    sizeScale: 0.0045,
-    rampLow: 2.5,
-    rampHigh: 6.5,
-  })
-  globe.addLayer('maritime', {
-    colorLow: 0x3fd0c9,
-    colorHigh: 0xe8e6e1,
-    sizeBase: 0.0035,
-    sizeScale: 0.00035,
-    rampLow: 0,
-    rampHigh: 20,
-  })
+  for (const layer of LAYERS) globe.addLayer(layer.name, layer.visual)
   globe.start()
 
-  // ── fetch both feeds concurrently ────────────────────────────────────────
+  // ── fetch every registered feed concurrently ─────────────────────────────
   statusEl.textContent = 'fetching feeds…'
   const registry = new EntityRegistry()
-  const feeds: FeedStatus[] = []
-  let allBatches: Batch[] = []
-  let validMin = Number.POSITIVE_INFINITY
-  let validMax = Number.NEGATIVE_INFINITY
+  const ingestor = new Ingestor(engine, registry, attrs)
+  const { feeds, validMin, validMax, ingestMs, batches, clamped } = await ingestor.cycle()
 
-  // allSettled, not all: one dead feed must degrade the map, not blank it.
-  const [quakeRes, vesselRes, emscRes] = await Promise.allSettled([
-    fetchQuakes(USGS_FEEDS.week),
-    fetchVessels(),
-    fetchEmsc(),
-  ])
-
-  if (quakeRes.status === 'fulfilled' && quakeRes.value.quakes.length > 0) {
-    const q = quakeRes.value.quakes
-    allBatches = allBatches.concat(buildBatches(q, registry, attrs))
-    for (const x of q) {
-      const t = toTimestamp(x.timeUnix)
-      if (t < validMin) validMin = t
-      if (t > validMax) validMax = t
-    }
-    feeds.push({ key: 'usgs', label: 'seismic', layer: 'seismic', count: q.length })
-  } else {
-    feeds.push({
-      key: 'usgs',
-      label: 'seismic',
-      layer: 'seismic',
-      count: 0,
-      error: quakeRes.status === 'rejected' ? String(quakeRes.reason).slice(0, 60) : 'no events',
-    })
-  }
-
-  if (vesselRes.status === 'fulfilled' && vesselRes.value.vessels.length > 0) {
-    const v = vesselRes.value.vessels
-    allBatches = allBatches.concat(
-      buildVesselBatches(v, registry, { position: attrs.vesselPosition, speed: attrs.speed }),
-    )
-    for (const x of v) {
-      const t = toTimestamp(x.timeUnix)
-      if (t < validMin) validMin = t
-      if (t > validMax) validMax = t
-    }
-    feeds.push({ key: 'digitraffic', label: 'maritime', layer: 'maritime', count: v.length })
-  } else {
-    feeds.push({
-      key: 'digitraffic',
-      label: 'maritime',
-      layer: 'maritime',
-      count: 0,
-      error:
-        vesselRes.status === 'rejected' ? String(vesselRes.reason).slice(0, 60) : 'no vessels',
-    })
-  }
-
-  // EMSC shares the `position` attribute with USGS DELIBERATELY. Both agencies
-  // describe earthquakes, so they belong to the same object type — and putting
-  // them in one attribute is what creates the entity-resolution problem rather
-  // than hiding it behind separate namespaces.
-  if (emscRes.status === 'fulfilled' && emscRes.value.events.length > 0) {
-    const e = emscRes.value.events
-    allBatches = allBatches.concat(
-      buildEmscBatches(e, registry, {
-        position: attrs.position,
-        magnitude: attrs.magnitude,
-        depth: attrs.depth,
-        region: attrs.region,
-      }),
-    )
-    for (const x of e) {
-      const t = toTimestamp(x.timeUnix)
-      if (t < validMin) validMin = t
-      if (t > validMax) validMax = t
-    }
-    feeds.push({ key: 'emsc', label: 'seismic · emsc', layer: 'seismic', count: e.length })
-  } else {
-    feeds.push({
-      key: 'emsc',
-      label: 'seismic · emsc',
-      layer: 'seismic',
-      count: 0,
-      error: emscRes.status === 'rejected' ? String(emscRes.reason).slice(0, 60) : 'no events',
-    })
-  }
-
-  if (allBatches.length === 0) {
+  if (batches === 0) {
     fail('Every feed failed. Nothing to display.')
     return
   }
+  if (clamped > 0) {
+    // Non-monotone wall clocks would break txn_at_or_before's binary search, so
+    // they are clamped — but silently clamping data is exactly the kind of thing
+    // this project refuses to do without saying so.
+    console.warn(`[parallax] ${clamped} batch(es) clamped forward to keep system time monotone`)
+  }
 
-  // ── ingest, in GLOBAL wall-clock order ───────────────────────────────────
-  //
-  // This sort is load-bearing, not tidiness. TxnId is assigned by insertion
-  // order, and the store's system-time index depends on sys_from being
-  // non-decreasing — that is what makes the binary search in
-  // Store::upper_row_for_txn correct. Ingesting all of one feed and then all
-  // of another would interleave wall clocks against transaction order, so
-  // scrubbing to "as known at 14:00" would show a 14:30 vessel beside a 13:00
-  // quake. Merging both feeds into one ascending timeline is what keeps the
-  // system axis meaning one thing across sources.
-  allBatches.sort((a, b) => a.wallClockUnix - b.wallClockUnix)
-
-  const t0 = performance.now()
-  for (const batch of allBatches) engine.ingest(batch.facts, batch.wallClockUnix)
-  // Once, after the last batch — see Engine.finishIngest.
-  engine.finishIngest()
-  const ingestMs = performance.now() - t0
 
   statusEl.textContent = 'LIVE'
   statusEl.classList.add('ok')
 
   // ── entity resolution ────────────────────────────────────────────────────
   //
-  // USGS and EMSC independently locate the same earthquakes with different
-  // coordinates, magnitudes, and ids, and nothing joins them. This is a real
-  // duplicate problem, not a demonstrated one.
-  engine.resolveEntities(attrs.position, attrs.magnitude)
+  // Which layers have duplicates worth resolving is the layer's own claim — see
+  // `resolveEntities` in sources/index.ts for why seismic is the one that does.
+  for (const layer of LAYERS) {
+    if (!layer.resolveEntities) continue
+    const geo = attrs[layer.geoAttr]
+    const scalar = attrs[layer.scalarAttr]
+    if (geo !== undefined && scalar !== undefined) engine.resolveEntities(geo, scalar)
+  }
   let evidence: MergeEvidence | null = null
   try {
     evidence = JSON.parse(engine.mergeEvidence(30)) as MergeEvidence
@@ -291,32 +182,73 @@ async function main(): Promise<void> {
   renderEvidence(document.querySelector<HTMLElement>('#evidence')!, evidence)
 
   // ── attribution ──────────────────────────────────────────────────────────
+  //
+  // Obligations live beside the layers rather than in the footer, because they
+  // are a property of which feeds are on — not chrome. The basemap adds its own
+  // when it is switched to something that carries terms.
   const liveIds = feeds.filter((f) => f.count > 0).map((f) => SOURCES[f.key]!.id)
-  sourcesEl.innerHTML = licenseObligations(liveIds)
-    .map((o) => `<span class="obligation">${o}</span>`)
-    .join(' · ')
+
+  function renderObligations(extra: readonly string[] = []): void {
+    const notes = [...licenseObligations(liveIds), ...extra]
+    sourcesEl.innerHTML =
+      `<div class="panel-title hud-label">obligations</div>` +
+      notes.map((o) => `<div class="obligation">${o}</div>`).join('')
+  }
+  renderObligations()
+
+  // ── map controls ─────────────────────────────────────────────────────────
+  const BASEMAP_TERMS: Partial<Record<Basemap, string>> = {
+    // Surfaced only while active. Share-alike and non-commercial are real
+    // obligations and this is the panel that exists to say so.
+    sat:
+      'Sentinel-2 cloudless 2024 by EOX IT Services GmbH — CC BY-NC-SA 4.0: ' +
+      'non-commercial, and derived works inherit the licence',
+  }
+
+  function bindSegment<T extends string>(
+    id: string,
+    attr: string,
+    apply: (value: T) => void,
+  ): void {
+    const host = document.querySelector<HTMLElement>(id)
+    if (!host) return
+    host.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        host.querySelectorAll('button').forEach((o) => o.classList.remove('on'))
+        b.classList.add('on')
+        apply(b.dataset[attr] as T)
+      })
+    })
+  }
+
+  bindSegment<Basemap>('#basemap-seg', 'basemap', (which) => {
+    globe.setBasemap(which)
+    const term = BASEMAP_TERMS[which]
+    renderObligations(term ? [term] : [])
+  })
+  bindSegment<ProjectionMode>('#projection-seg', 'projection', (mode) => {
+    globe.setProjectionMode(mode)
+  })
 
   // ── layer panel ──────────────────────────────────────────────────────────
-  const visible: Record<string, boolean> = { seismic: true, maritime: true }
-  layersEl.innerHTML = feeds
-    .map(
-      (f) => `
-      <label class="layer-row ${f.error ? 'dead' : ''}">
-        <input type="checkbox" data-layer="${f.layer}" ${f.error ? 'disabled' : 'checked'} />
-        <span class="hud-label">${f.label}</span>
-        <span class="v ${f.error ? 'bad' : ''}">${f.error ? 'unavailable' : f.count.toLocaleString()}</span>
-      </label>`,
-    )
-    .join('')
+  const visible: Record<string, boolean> = {}
+  for (const layer of LAYERS) visible[layer.name] = layer.enabledByDefault ?? true
 
-  layersEl.querySelectorAll<HTMLInputElement>('input[data-layer]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const name = cb.dataset.layer!
-      visible[name] = cb.checked
-      globe.setLayerVisible(name, cb.checked)
-      refresh()
+  const drawLayerPanel = (): void =>
+    renderLayerPanel({
+      host: layersEl,
+      layers: LAYERS,
+      feeds,
+      visible,
+      counts: globe.layerCounts,
+      onToggle: (name, on) => {
+        visible[name] = on
+        globe.setLayerVisible(name, on)
+        refresh()
+      },
     })
-  })
+
+  drawLayerPanel()
 
   // ── scrubber ─────────────────────────────────────────────────────────────
   const transactions = engine.transactions()
@@ -340,38 +272,40 @@ async function main(): Promise<void> {
     let chunks = 0
     let queryMs = 0
 
-    const seismic = engine.queryPoints(state.validAt, state.sysAt, attrs.position, attrs.magnitude)
-    globe.updateLayer('seismic', engine.heap.pointView(seismic), visible.seismic ? seismic.count : 0)
-    {
+    // One query per layer. `truncated` is ORed across them because the render
+    // buffer is fixed-capacity and shared — an oversized result returns what
+    // fits and says so rather than growing under a view JavaScript holds.
+    let truncated = false
+    let queries = 0
+
+    for (const layer of LAYERS) {
+      const geo = attrs[layer.geoAttr]
+      const scalar = attrs[layer.scalarAttr]
+      if (geo === undefined || scalar === undefined) continue
+
+      const result = engine.queryPoints(state.validAt, state.sysAt, geo, scalar)
+      globe.updateLayer(
+        layer.name,
+        engine.heap.pointView(result),
+        visible[layer.name] === false ? 0 : result.count,
+      )
+
       const s = engine.lastScan()
-      total += seismic.count
+      total += result.count
       scanned += s.rowsScanned
       skipped += s.chunksSkipped
       chunks = Math.max(chunks, s.chunksTotal)
       queryMs += s.queryMs
+      truncated = truncated || Boolean(result.truncated)
+      queries++
     }
 
-    const maritime = engine.queryPoints(
-      state.validAt,
-      state.sysAt,
-      attrs.vesselPosition,
-      attrs.speed,
-    )
-    globe.updateLayer(
-      'maritime',
-      engine.heap.pointView(maritime),
-      visible.maritime ? maritime.count : 0,
-    )
-    {
-      const s = engine.lastScan()
-      total += maritime.count
-      scanned += s.rowsScanned
-      skipped += s.chunksSkipped
-      chunks = Math.max(chunks, s.chunksTotal)
-      queryMs += s.queryMs
-    }
+    // chunks are counted per query, so the denominator scales with layer count
+    // rather than being hardcoded to two.
+    const chunkTotal = chunks * Math.max(queries, 1)
+    const skipPct = chunkTotal > 0 ? ((skipped / chunkTotal) * 100).toFixed(0) : '0'
 
-    const skipPct = chunks > 0 ? ((skipped / (chunks * 2)) * 100).toFixed(0) : '0'
+    updateLayerCounts(layersEl, globe.layerCounts)
 
     readoutEl.innerHTML = [
       row('visible', total.toLocaleString(), 'ok'),
@@ -380,11 +314,11 @@ async function main(): Promise<void> {
       row('transactions', `${state.sysAt} / ${transactions.length - 1}`, 'sys'),
       row('query', `${queryMs.toFixed(3)} ms`),
       row('rows scanned', scanned.toLocaleString()),
-      row('chunks skipped', `${skipped}/${chunks * 2} · ${skipPct}%`),
+      row('chunks skipped', `${skipped}/${chunkTotal} · ${skipPct}%`),
       row('store', `${(engine.heapBytes / 1024).toFixed(0)} KB`),
       row('ingest', `${ingestMs.toFixed(1)} ms`),
       row('frame', `${globe.frameMs.toFixed(2)} ms`),
-      seismic.truncated || maritime.truncated ? row('truncated', 'buffer full', 'bad') : '',
+      truncated ? row('truncated', 'buffer full', 'bad') : '',
     ].join('')
   }
 
@@ -413,11 +347,17 @@ async function main(): Promise<void> {
   const explainHost = document.querySelector<HTMLElement>('#explain')!
   const examplesHost = document.querySelector<HTMLDivElement>('#query-examples')!
 
+  // One example per capability worth discovering, not a feature list. The
+  // aurora one is the important one: it is the only query that reaches the
+  // region of the scrubber ABOVE the diagonal, because a forecast is asserted
+  // before the instant it describes.
   const EXAMPLES = [
     'earthquakes where magnitude > 4.5',
-    'earthquakes in bbox(30, 120, 50, 150)',
+    'earthquakes order by magnitude desc limit 20',
+    'aurora as of +90m',
+    'aircraft where altitude > 30000',
+    'alerts since -24h',
     'vessels within 40km of (60.15, 24.95)',
-    'earthquakes where magnitude > 5 limit 20',
   ]
   examplesHost.innerHTML = EXAMPLES.map(
     (e) => `<button class="query-example" type="button">${e}</button>`,
@@ -438,6 +378,19 @@ async function main(): Promise<void> {
       renderAudit(host, JSON.parse(engine.auditLog(20)) as AuditLog)
     } catch (err) {
       console.error('[parallax] audit log was not valid JSON', err)
+    }
+  }
+
+  /**
+   * Empties every layer.
+   *
+   * A refused query must leave nothing on screen. Showing the previous result
+   * under a refusal notice would make the refusal look cosmetic — the point of
+   * a plan-time denial is that the rows were never read.
+   */
+  function clearLayers(buffer: Parameters<typeof engine.heap.pointView>[0]): void {
+    for (const layer of LAYERS) {
+      globe.updateLayer(layer.name, engine.heap.pointView(buffer), 0)
     }
   }
 
@@ -472,8 +425,7 @@ async function main(): Promise<void> {
         <div class="qd-why">${result.denialExplanation}</div>
         <div class="qd-trigger">triggered by: ${result.denialOffending}</div>
         <div class="qd-remedy">${result.denialRemedy}</div>`
-      globe.updateLayer('seismic', engine.heap.pointView(result.buffer), 0)
-      globe.updateLayer('maritime', engine.heap.pointView(result.buffer), 0)
+      clearLayers(result.buffer)
       renderExplain(explainHost, null)
       refreshAudit()
       return
@@ -501,10 +453,19 @@ async function main(): Promise<void> {
     queryInput.classList.remove('invalid', 'denied')
     queryError.hidden = true
 
-    // The result set is a single layer; the other is emptied so what is on
-    // screen is exactly what the query returned.
-    globe.updateLayer('seismic', engine.heap.pointView(result.buffer), result.buffer.count)
-    globe.updateLayer('maritime', engine.heap.pointView(result.buffer), 0)
+    // The result set REPLACES the layers: the layer whose source was queried
+    // shows it and every other is emptied, so what is on screen is exactly what
+    // the query returned. Routing by source name also keeps the result in its
+    // own colour ramp — a vessel query used to render in the seismic amber
+    // because the buffer carries no source of its own.
+    const target = layerForQuery(sql) ?? LAYERS[0]
+    for (const layer of LAYERS) {
+      globe.updateLayer(
+        layer.name,
+        engine.heap.pointView(result.buffer),
+        layer.name === target?.name ? result.buffer.count : 0,
+      )
+    }
 
     let plan: ExplainPlan | null = null
     try {
@@ -516,6 +477,8 @@ async function main(): Promise<void> {
     refreshAudit()
 
     const scan = engine.lastScan()
+    updateLayerCounts(layersEl, globe.layerCounts)
+
     readoutEl.innerHTML = [
       row('query rows', result.buffer.count.toLocaleString(), 'ok'),
       row('facts', engine.factCount.toLocaleString()),

@@ -5,15 +5,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-  # The snapshot job commits refreshed .pxsnap files with GITHUB_TOKEN, and
-  # commits made with that token deliberately do not trigger other workflows —
-  # otherwise a workflow could trigger itself forever. Without this hook fresh
-  # data would sit in the repo undeployed until the next unrelated push.
-  # Chaining on workflow_run avoids having to create and rotate a PAT.
-  workflow_run:
-    workflows: ['Snapshot']
-    types: [completed]
-
 permissions:
   contents: read
   pages: write
