@@ -24,13 +24,39 @@
 // the merits: it is daily imagery, so cloud, smoke and dust are visible, where a
 // static mosaic is wallpaper.
 // ────────────────────────────────────────────────────────────────────────────
-import { Map as MlMap, NavigationControl, ScaleControl } from 'maplibre-gl'
+import { Map as MlMap, NavigationControl, ScaleControl, setWorkerUrl } from 'maplibre-gl'
 import type { StyleSpecification } from 'maplibre-gl'
+// `?worker&url` — BUNDLES the worker with its dependencies and returns the URL.
+// Plain `?url` copies the file verbatim, which breaks it: the worker imports a
+// sibling `maplibre-gl-shared.mjs` that is then not next to it, so the module
+// fails to load and the worker closes the instant it starts. See setWorkerUrl.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
 import type { LayerSpec } from './pointsLayer'
 import { PointProgramCache, PointsLayer } from './pointsLayer'
 
 export type { LayerSpec } from './pointsLayer'
+
+/**
+ * Tell MapLibre where its worker actually is.
+ *
+ * v6 locates the worker by taking `import.meta.url` AT RUNTIME and swapping the
+ * filename for `maplibre-gl-worker.mjs`. That is invisible to a bundler, so Vite
+ * never emits the chunk, and the request resolves to a path that does not exist
+ * — which on a SPA host returns index.html with `Content-Type: text/html`, HTTP
+ * 200. The worker then fails to execute.
+ *
+ * Nothing reports this. The map still constructs, the style still parses, layers
+ * still attach, `render` still fires. But EVERY source is parsed in that worker,
+ * so vector tiles never arrive and neither does any GeoJSON: the result is a
+ * globe with no coastline, no borders and no place names — a dark ball — with an
+ * empty console and a healthy frame counter.
+ *
+ * Importing the worker with `?url` makes Vite emit it and return the hashed
+ * path, which is then handed over explicitly. Module scope, so it is set before
+ * any Map is constructed.
+ */
+setWorkerUrl(maplibreWorkerUrl)
 
 export type Basemap = 'dark' | 'sat' | 'live'
 export type ProjectionMode = 'globe' | 'mercator'
@@ -59,22 +85,36 @@ function recentImageryDate(): string {
 }
 
 /**
- * Administrative boundaries, made visible.
+ * Coastlines and administrative boundaries, drawn from data we ship.
  *
- * The dark style already carries them — `boundary_state` and two zoom-split
- * `boundary_country` layers over the `boundary` source-layer. They were simply
- * invisible: country lines at hsl(0,0%,23%) and state lines at hsl(0,0%,21%),
- * drawn on a background of rgb(12,12,12). Roughly 10% of lightness above the
- * page, which is a border you can find only if you already know where it is.
+ * The dark style carries its own — `boundary_state` and two `boundary_country`
+ * layers — but they come from the `openmaptiles` VECTOR SOURCE, and that source
+ * requests no tiles at all here: the TileJSON resolves, the worker spawns, one
+ * covering tile is computed, and not a single .pbf is ever fetched. Reproduced
+ * under both software and Metal GPU, and with the UNMODIFIED upstream style, so
+ * it is neither our style edits nor the renderer. Whatever the cause, the result
+ * is a globe with no coastline and no borders — a dark ball you cannot navigate.
  *
- * Restyling what exists beats adding parallel layers: these already carry
- * OpenMapTiles' tuned width interpolations and, importantly, the `claimed_by`
- * filter that stops disputed borders being drawn twice.
+ * Natural Earth is the answer that does not depend on that pipeline. It is
+ * public domain, it is the reference dataset for exactly this, and 144 KB
+ * gzipped buys a legible planet that cannot silently fail to arrive. The style's
+ * own boundary layers are hidden so the two can never double-draw.
  *
  * Neutral grey deliberately. Every saturated colour on this map means something
  * — amber seismic, teal maritime, green aurora — so a coloured border would
  * read as another data layer rather than as the basemap.
  */
+const NE: { id: string; file: string; color: string; opacity: number; width: [number, number] }[] = [
+  // Coastline first and dimmest: it is the most line by far, and it is context
+  // rather than information.
+  { id: 'px-ne-coast', file: 'coastline.json', color: 'hsl(205, 18%, 46%)', opacity: 0.85, width: [0.6, 1.6] },
+  // States: subordinate to countries, and dashed below.
+  { id: 'px-ne-states', file: 'states.json', color: 'hsl(210, 10%, 44%)', opacity: 0.7, width: [0.4, 1.1] },
+  // Countries: the strongest line on the basemap.
+  { id: 'px-ne-countries', file: 'countries.json', color: 'hsl(210, 16%, 66%)', opacity: 0.9, width: [0.8, 2.2] },
+]
+
+/** The style's own vector boundaries, hidden in favour of the shipped ones. */
 const BOUNDARY_PAINT: Record<string, { color: string; opacity: number; boost: number }> = {
   // Countries: the strongest line on the basemap.
   'boundary_country_z0-4': { color: 'hsl(210, 14%, 62%)', opacity: 0.75, boost: 1.0 },
@@ -85,35 +125,8 @@ const BOUNDARY_PAINT: Record<string, { color: string; opacity: number; boost: nu
 }
 
 /** Imagery is bright and busy; borders need more contrast over it than over dark. */
-const BOUNDARY_OPACITY_OVER_IMAGERY = 0.9
+const BOUNDARY_OPACITY_OVER_IMAGERY = 1.0
 
-/**
- * Scales a line-width expression by scaling its OUTPUT STOPS.
- *
- * The obvious version — `['*', <interpolate>, factor]` — is invalid, and
- * invalid in a way that costs far more than it looks. The style spec requires
- * `['zoom']` to be the direct input of a TOP-LEVEL `interpolate` or `step`;
- * wrapping the interpolate in a multiply demotes it, MapLibre rejects the
- * WHOLE STYLE, and the map then has no basemap and no data layers at all —
- * while still firing `render`, so the frame counter looks perfectly healthy
- * over a black canvas. One malformed paint property took down everything.
- *
- * Multiplying the stop outputs is equivalent and keeps `['zoom']` where the
- * spec requires it.
- */
-function scaleLineWidth(width: unknown, factor: number): unknown {
-  if (factor === 1) return width
-  if (typeof width === 'number') return width * factor
-  if (Array.isArray(width) && width[0] === 'interpolate') {
-    // ['interpolate', interpolation, input, in0, out0, in1, out1, ...]
-    const scaled = [...width]
-    for (let i = 4; i < scaled.length; i += 2) {
-      if (typeof scaled[i] === 'number') scaled[i] = (scaled[i] as number) * factor
-    }
-    return scaled
-  }
-  return width
-}
 
 /**
  * Land and water, made distinguishable.
@@ -262,21 +275,42 @@ async function buildStyle(): Promise<StyleSpecification> {
     }
   }
 
-  // Boundaries sit well after the insertion point above, so they already draw
-  // over the imagery — which is what makes satellite mode navigable.
+  // The style's own boundaries are hidden rather than restyled: their source
+  // never delivers, and leaving them visible would double-draw if it ever did.
   for (const layer of style.layers) {
-    const want = BOUNDARY_PAINT[layer.id]
-    if (!want || layer.type !== 'line') continue
-    const paint = (layer.paint ?? {}) as Record<string, unknown>
-    paint['line-color'] = want.color
-    paint['line-opacity'] = want.opacity
-    // Keep OpenMapTiles' width interpolation and scale it, rather than
-    // replacing it with a constant that would be hairline at z2 and a slab at
-    // z18. Scaled by its stops — see scaleLineWidth for why wrapping is fatal.
-    paint['line-width'] = scaleLineWidth(paint['line-width'] ?? 1, want.boost)
-    // The default blur softens these into nothing at low zoom.
-    paint['line-blur'] = 0
-    layer.paint = paint as never
+    if (!(layer.id in BOUNDARY_PAINT)) continue
+    layer.layout = { ...(layer.layout ?? {}), visibility: 'none' } as never
+  }
+
+  // Coastline and borders from data we ship. Inserted after the imagery so they
+  // draw over it, and before the first symbol layer so place names stay on top.
+  const labelsAt = style.layers.findIndex((l) => l.type === 'symbol')
+  const insertAt = labelsAt === -1 ? style.layers.length : labelsAt
+
+  for (let i = 0; i < NE.length; i++) {
+    const ne = NE[i]!
+    style.sources[ne.id] = { type: 'geojson', data: `${import.meta.env.BASE_URL}ne/${ne.file}` }
+    style.layers.splice(insertAt + i, 0, {
+      id: ne.id,
+      type: 'line',
+      source: ne.id,
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': ne.color,
+        'line-opacity': ne.opacity,
+        // Thin at world zoom, heavier as you close in.
+        //
+        // ['zoom'] must be the DIRECT input of a top-level interpolate. Nesting
+        // it inside any other expression — even something as innocent as
+        // ['*', <interpolate>, 0.8] — makes MapLibre reject the entire style,
+        // not just this property. That leaves no basemap and nowhere to attach a
+        // custom layer, while `render` keeps firing, so the frame counter reads
+        // healthy over a black canvas with nothing logged. It cost a full
+        // debugging round; scale the stop outputs instead.
+        'line-width': ['interpolate', ['linear'], ['zoom'], 1, ne.width[0], 10, ne.width[1]],
+        ...(ne.id === 'px-ne-states' ? { 'line-dasharray': [3, 2] } : {}),
+      },
+    } as never)
   }
 
   return style
@@ -519,12 +553,12 @@ export class Globe {
 
     // Borders carry the whole orientation burden once imagery is underneath, so
     // they are lifted rather than left at their dark-basemap weight.
-    for (const [id, want] of Object.entries(BOUNDARY_PAINT)) {
-      if (!map.getLayer(id)) continue
+    for (const ne of NE) {
+      if (!map.getLayer(ne.id)) continue
       map.setPaintProperty(
-        id,
+        ne.id,
         'line-opacity',
-        which === 'dark' ? want.opacity : BOUNDARY_OPACITY_OVER_IMAGERY,
+        which === 'dark' ? ne.opacity : BOUNDARY_OPACITY_OVER_IMAGERY,
       )
     }
   }

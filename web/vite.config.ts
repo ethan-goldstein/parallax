@@ -14,6 +14,12 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   base: '/parallax/',
 
+  // MapLibre's worker is an ES module and imports a sibling chunk. Bundling it
+  // in the classic format would drop those imports on the floor.
+  worker: {
+    format: 'es',
+  },
+
   build: {
     target: 'es2022',
     outDir: 'dist',
