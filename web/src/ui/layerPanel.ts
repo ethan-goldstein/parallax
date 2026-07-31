@@ -133,6 +133,15 @@ export function updateLayerCounts(
     const n = counts[el.dataset.layerCount!]
     if (n !== undefined && el.textContent !== '—') el.textContent = compact(n)
   })
+
+  // The "none valid right now" note has to move with the count, not with the
+  // panel. It is decided when the panel is BUILT and the counts change on every
+  // scrub and every poll, so leaving it alone let a layer display "none valid at
+  // the instant the scrubber is on" directly above a live count of 118, while
+  // drawing all 118 on the map.
+  host.querySelectorAll<HTMLElement>('[data-elsewhere]').forEach((el) => {
+    el.hidden = (counts[el.dataset.elsewhere!] ?? 0) > 0
+  })
 }
 
 export function renderLayerPanel(opts: LayerPanelOptions): void {
@@ -208,8 +217,8 @@ export function renderLayerPanel(opts: LayerPanelOptions): void {
       // clearest possible statement of what the valid axis is FOR.
       const ingested = sources.reduce((n, s) => n + s.count, 0)
       const timeNote =
-        !dead && total === 0 && ingested > 0
-          ? `<div class="layer-note layer-elsewhere">${ingested.toLocaleString()} facts held, none valid at the instant the scrubber is on — drag the valid axis to reach them</div>`
+        !dead && ingested > 0
+          ? `<div class="layer-note layer-elsewhere" data-elsewhere="${escapeHtml(layer.name)}" ${total === 0 ? '' : 'hidden'}>${ingested.toLocaleString()} facts held, none valid at the instant the scrubber is on — drag the valid axis to reach them</div>`
           : ''
 
       // A dead layer opens by default: the reason it is dead is the only thing
