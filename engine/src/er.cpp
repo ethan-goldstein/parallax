@@ -216,9 +216,16 @@ Resolution resolve(const std::vector<Record>& records, const ErConfig& cfg,
     blocks[cell].push_back(i);
 
     // 600-second buckets, tagged so time keys cannot collide with geo keys.
-    const u64 time_key = 0x7000'0000'0000'0000ull |
-                         static_cast<u64>(static_cast<i64>(records[i].time) / 600);
-    blocks[time_key].push_back(i);
+    //
+    // The tag is a typed u64 constant rather than a `ull` literal. On Linux
+    // u64 is `unsigned long` while a ull literal is `unsigned long long` —
+    // distinct types even at identical width — so mixing them trips
+    // -Wsign-conversion under GCC while compiling cleanly under Apple clang,
+    // where u64 already IS unsigned long long. Constructing the constant at
+    // the alias type is correct on both.
+    constexpr u64 kTimeKeyTag = u64{0x7000'0000'0000'0000};
+    const u64 bucket = static_cast<u64>(static_cast<i64>(records[i].time) / 600);
+    blocks[kTimeKeyTag | bucket].push_back(i);
   }
   res.stats.blocks = static_cast<u32>(blocks.size());
 
