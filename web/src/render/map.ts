@@ -87,6 +87,22 @@ const BOUNDARY_PAINT: Record<string, { color: string; opacity: number; boost: nu
 /** Imagery is bright and busy; borders need more contrast over it than over dark. */
 const BOUNDARY_OPACITY_OVER_IMAGERY = 0.9
 
+/**
+ * Land and water, made distinguishable.
+ *
+ * The `dark` style has NO land fill — land is literally the page background,
+ * rgb(12,12,12) — and water is rgb(27,27,29). Fifteen units of lightness apart,
+ * which at world zoom is a black rectangle. It is a city style: it assumes you
+ * are close enough that roads and buildings carry the structure, and at z1 there
+ * are no roads.
+ *
+ * Land is lifted and water is pushed down so the coastline is legible before any
+ * data is drawn on it. Both stay far below the dimmest data colour — a basemap
+ * that competes with the points is worse than one you cannot see.
+ */
+const LAND_COLOR = '#181c22'
+const WATER_COLOR = '#05080d'
+
 /** Screen-space hit tolerance. Roughly a fingertip, and wider than most dots. */
 const PICK_TOLERANCE_PX = 12
 
@@ -187,6 +203,16 @@ async function buildStyle(): Promise<StyleSpecification> {
       layout: { visibility: 'none' },
       paint: { 'raster-opacity': 1 },
     })
+  }
+
+  // Land/water contrast, before boundaries. Without this the globe is a black
+  // disc at every zoom below about z8.
+  for (const layer of style.layers) {
+    if (layer.type === 'background') {
+      layer.paint = { ...(layer.paint ?? {}), 'background-color': LAND_COLOR } as never
+    } else if (layer.id === 'water' && layer.type === 'fill') {
+      layer.paint = { ...(layer.paint ?? {}), 'fill-color': WATER_COLOR } as never
+    }
   }
 
   // Boundaries sit well after the insertion point above, so they already draw
@@ -348,6 +374,23 @@ export class Globe {
     if (!layer) return
     layer.setData(view, count)
     this.#map?.triggerRepaint()
+  }
+
+  /**
+   * Why the map might be showing nothing.
+   *
+   * `null` means healthy. Anything else is the one line worth putting on screen:
+   * a black canvas with a ticking frame counter is indistinguishable from "the
+   * feeds returned no data", and the two have completely different fixes.
+   */
+  get renderFault(): string | null {
+    if (!this.#map) return 'basemap style did not load'
+    if (!this.#ready) return 'style loaded but layers not attached'
+    for (const [name, layer] of this.#layers) {
+      if (layer.failure) return `layer ${name}: ${layer.failure}`
+      if (!this.map?.getLayer(name)) return `layer ${name} not attached to the map`
+    }
+    return null
   }
 
   /** Instances currently drawn per layer. Diagnostics, and how tests see routing. */

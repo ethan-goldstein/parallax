@@ -379,6 +379,9 @@ async function main(): Promise<void> {
       row('ingest', `${ingestMs.toFixed(1)} ms`),
       row('frame', `${globe.frameMs.toFixed(2)} ms`),
       truncated ? row('truncated', 'buffer full', 'bad') : '',
+      // Only appears when something is actually wrong. A map that renders
+      // nothing should say so rather than looking like an empty world.
+      globe.renderFault ? row('render', globe.renderFault, 'bad') : '',
     ].join('')
   }
 

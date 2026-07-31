@@ -19,7 +19,7 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from 'maplibre-gl'
 
 import { POINT_FLOATS } from '../engine/abi'
-import { buildProgram, rgb, uniformLocations } from './glutil'
+import { buildProgram, rgb, ShaderError, uniformLocations } from './glutil'
 import FRAGMENT_SOURCE from './shaders/points.frag.glsl?raw'
 import VERTEX_BODY from './shaders/points.vert.glsl?raw'
 
@@ -211,9 +211,31 @@ export class PointsLayer implements CustomLayerInterface {
     this.#gl = null
   }
 
-  render(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
-    if (!this.visible || this.#count === 0 || !this.#vao) return
+  /**
+   * Set once if this layer has failed, so a broken layer reports instead of
+   * throwing sixty times a second.
+   *
+   * A custom layer that throws inside render takes MapLibre's frame with it, and
+   * the symptom is a black map with a healthy-looking frame counter — no error
+   * anyone sees, nothing drawn, everything apparently fine. That failure mode
+   * cost a full debugging round, so it is now impossible: the layer disables
+   * itself and says why.
+   */
+  failure: string | null = null
 
+  render(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
+    if (this.failure || !this.visible || this.#count === 0 || !this.#vao) return
+
+    try {
+      this.#draw(gl, args)
+    } catch (err) {
+      this.failure = err instanceof Error ? err.message : String(err)
+      console.error(`[parallax] layer "${this.id}" disabled itself:`, err)
+      if (err instanceof ShaderError) console.error(err.log)
+    }
+  }
+
+  #draw(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
     const { program, uniforms: u } = this.programs.get(gl, args.shaderData)
     gl.useProgram(program)
 
@@ -227,7 +249,10 @@ export class PointsLayer implements CustomLayerInterface {
     gl.uniform1f(u.u_projection_transition, p.projectionTransition)
     // Antimeridian clipping splits geometry that spans the seam. A point is a
     // single vertex and cannot span anything, so it never applies here.
-    gl.uniform1i(u.u_projection_clip_antimeridian, 0)
+    // Read the real value rather than assuming. It is false for points in
+    // practice — a single vertex cannot span the seam — but hardcoding a
+    // projection input is how a renderer drifts from its host.
+    gl.uniform1i(u.u_projection_clip_antimeridian, p.clipAntimeridian ? 1 : 0)
 
     gl.uniform2f(u.u_viewport, gl.drawingBufferWidth, gl.drawingBufferHeight)
     gl.uniform1f(u.u_sizeBase, this.spec.sizeBase)
