@@ -646,6 +646,10 @@ export class Globe {
   stop(): void {
     this.#autoRotate = false
     this.#rotating = false
+    // Clearing the flags does not cancel the easeTo already in flight, so the
+    // globe kept turning after being told to stop — which silently invalidates
+    // any screen coordinate computed from map.project() a moment earlier.
+    this.#map?.stop()
   }
 
   set autoRotate(v: boolean) {
