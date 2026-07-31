@@ -812,3 +812,126 @@
     bottom: auto;
   }
 }
+
+/* ── benchmark panel ─────────────────────────────────────────────────────── */
+
+.bench {
+  position: fixed;
+  left: var(--s-6);
+  top: 84px;
+  width: 20rem;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: var(--fs-micro);
+}
+
+.bench-run {
+  display: block;
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-hud);
+  text-transform: uppercase;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bench-run:hover {
+  color: var(--ink);
+}
+
+.bn-running {
+  padding: var(--s-2) var(--s-3);
+  color: var(--ink-dim);
+}
+
+.bn-head {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.bn-rows {
+  font-family: var(--font-mono);
+  color: var(--ink-dim);
+}
+
+.bn-row {
+  display: grid;
+  grid-template-columns: 1fr 4.5rem 6rem;
+  gap: var(--s-2);
+  padding: 3px var(--s-3);
+  align-items: baseline;
+}
+
+.bn-label {
+  font-family: var(--font-mono);
+  color: var(--ink-dim);
+}
+
+.bn-label em {
+  font-style: normal;
+  color: var(--ink-faint);
+}
+
+/* The kernel that actually ships. */
+.bn-row.best .bn-label,
+.bn-row.best .bn-ms,
+.bn-row.best .bn-rate {
+  color: var(--valid-time);
+}
+
+.bn-ms,
+.bn-rate {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+
+.bn-verdict {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--rule);
+}
+
+.bn-speedup {
+  font-family: var(--font-mono);
+  font-size: var(--fs-large);
+  color: var(--accent);
+}
+
+.bn-note {
+  padding: var(--s-1) var(--s-3) var(--s-2);
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.bn-note.bad {
+  color: var(--deny);
+}
+
+@media (max-width: 1180px) {
+  .bench {
+    display: none;
+  }
+}
+
+/* The honest-result note. Bone rather than faint: it is the most important
+   thing in the panel, not a caveat to be skimmed past. */
+.bn-note.honest {
+  color: var(--ink-dim);
+  border-top: 1px solid var(--rule);
+  padding-top: var(--s-2);
+}

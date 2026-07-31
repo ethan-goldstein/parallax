@@ -127,6 +127,33 @@ class Store {
   void as_of(Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
              ScanStats* stats = nullptr) const;
 
+  /// Which scan kernel as_of() will use.
+  enum class Kernel : u8 { Scalar, Simd };
+
+  /// Forces a kernel, for benchmarking ONLY.
+  ///
+  /// Both must return identical results — the differential test in
+  /// tests/test_store.cpp runs against whichever is selected, so a SIMD lane
+  /// bug fails the same property the scalar version is held to. Publishing a
+  /// speedup for a kernel that is not also proven correct would be worthless.
+  void as_of_with(Kernel k, Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
+                  ScanStats* stats = nullptr) const;
+
+  /// Whether this build actually has a vectorised kernel.
+  [[nodiscard]] static bool simd_available() noexcept;
+
+  /// Raw pointers to the four columns the visibility predicate reads.
+  ///
+  /// Exposed for ONE purpose: so the in-browser benchmark can run the identical
+  /// predicate from JavaScript over the identical memory. A "C++ vs JS"
+  /// comparison where the two sides read different data, or where JS has to
+  /// marshal a copy first, measures the marshalling and proves nothing. Same
+  /// bytes, same predicate, different language.
+  [[nodiscard]] const u32* sys_from_data() const noexcept { return sys_from_.data(); }
+  [[nodiscard]] const u32* sys_to_data() const noexcept { return sys_to_.data(); }
+  [[nodiscard]] const i32* valid_from_data() const noexcept { return valid_from_.data(); }
+  [[nodiscard]] const i32* valid_to_data() const noexcept { return valid_to_.data(); }
+
   /// Same slice, restricted to one entity, served from the CSR index rather
   /// than by scanning. Same shape as the sprayStart/sprayBase offset arrays in
   /// brain3d.ts: entity_offset_[e]..entity_offset_[e+1] is a contiguous range

@@ -10,3 +10,6 @@
 
 add_executable(px_cli px_cli.cpp)
 target_link_libraries(px_cli PRIVATE px_core px_warnings)
+
+add_executable(px_bench px_bench.cpp)
+target_link_libraries(px_bench PRIVATE px_core px_warnings)

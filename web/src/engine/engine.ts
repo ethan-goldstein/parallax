@@ -97,6 +97,7 @@ interface EngineExports {
   resolveEntities(geoAttr: number, scalarAttr: number): ErStats
   mergeEvidence(limit: number): string
   unmergePair(pairIndex: number): void
+  benchScan(iterations: number): unknown
 }
 
 export class Engine {
@@ -254,6 +255,15 @@ export class Engine {
 
   unmergePair(pairIndex: number): void {
     this.#x.unmergePair(pairIndex)
+  }
+
+  /**
+   * Times the bitemporal scan with both kernels and returns pointers to the
+   * predicate columns, so the caller can run the identical loop in JS over the
+   * identical bytes.
+   */
+  benchScan(iterations = 5): unknown {
+    return this.#x.benchScan(iterations)
   }
 
   /** Every transaction, for labelling the system-time axis. */

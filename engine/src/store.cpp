@@ -2,6 +2,10 @@
 
 #include <algorithm>
 
+#ifdef __wasm_simd128__
+#include <wasm_simd128.h>
+#endif
+
 namespace px {
 
 Store::Store() {
@@ -142,8 +146,87 @@ u32 Store::upper_row_for_txn(u32 sys_at) const noexcept {
   return static_cast<u32>(it - begin);
 }
 
-void Store::as_of(Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
-                  ScanStats* stats) const {
+bool Store::simd_available() noexcept {
+#ifdef __wasm_simd128__
+  return true;
+#else
+  return false;
+#endif
+}
+
+namespace {
+
+/// Scan one chunk with the scalar kernel. Returns rows matched.
+///
+/// Written first, and kept forever: it is the reference the vectorised kernel
+/// is checked against, and the only kernel on targets without SIMD.
+inline void scan_scalar(u32 begin, u32 end, i32 valid_at, u32 s,
+                        const std::vector<u32>& sys_from, const std::vector<u32>& sys_to,
+                        const std::vector<i32>& valid_from, const std::vector<i32>& valid_to,
+                        std::vector<FactId>& out) {
+  for (u32 i = begin; i < end; ++i) {
+    // Bitwise & on deliberately int-ified comparisons, not &&. Short-circuit
+    // would introduce a data-dependent branch per row, and at ~50% match rates
+    // the predictor cannot help — the mispredicts cost more than evaluating
+    // both sides always.
+    const int known_then =
+        static_cast<int>(sys_from[i] <= s) & static_cast<int>(s < sys_to[i]);
+    const int true_then = static_cast<int>(valid_from[i] <= valid_at) &
+                          static_cast<int>(valid_at < valid_to[i]);
+    if ((known_then & true_then) != 0) out.push_back(FactId{i});
+  }
+}
+
+#ifdef __wasm_simd128__
+/// Vectorised kernel: four rows per iteration.
+///
+/// All four columns are 32-bit — which is WHY they are 32-bit. A 64-bit
+/// timestamp would halve the lanes and roughly halve this speedup, and that
+/// tradeoff is the reason px/value.hpp accepts one-second resolution.
+///
+/// Note the mixed signedness: sys_* are u32 (transaction ids) and valid_* are
+/// i32 (signed seconds), so the comparisons must use the u32x4 and i32x4
+/// variants respectively. Using the signed compare on transaction ids would
+/// silently misclassify every id above 2^31.
+inline void scan_simd(u32 begin, u32 end, i32 valid_at, u32 s,
+                      const std::vector<u32>& sys_from, const std::vector<u32>& sys_to,
+                      const std::vector<i32>& valid_from, const std::vector<i32>& valid_to,
+                      std::vector<FactId>& out) {
+  const v128_t vs = wasm_u32x4_splat(s);
+  const v128_t vt = wasm_i32x4_splat(valid_at);
+
+  u32 i = begin;
+  for (; i + 4 <= end; i += 4) {
+    const v128_t sf = wasm_v128_load(&sys_from[i]);
+    const v128_t st = wasm_v128_load(&sys_to[i]);
+    const v128_t vf = wasm_v128_load(&valid_from[i]);
+    const v128_t vto = wasm_v128_load(&valid_to[i]);
+
+    const v128_t known = wasm_v128_and(wasm_u32x4_le(sf, vs), wasm_u32x4_lt(vs, st));
+    const v128_t truth = wasm_v128_and(wasm_i32x4_le(vf, vt), wasm_i32x4_lt(vt, vto));
+    const v128_t mask = wasm_v128_and(known, truth);
+
+    // One branch per four rows instead of per row. At the sparse match rates
+    // this store sees, most groups are entirely empty and skip the extracts.
+    if (!wasm_v128_any_true(mask)) continue;
+
+    if (wasm_i32x4_extract_lane(mask, 0)) out.push_back(FactId{i});
+    if (wasm_i32x4_extract_lane(mask, 1)) out.push_back(FactId{i + 1});
+    if (wasm_i32x4_extract_lane(mask, 2)) out.push_back(FactId{i + 2});
+    if (wasm_i32x4_extract_lane(mask, 3)) out.push_back(FactId{i + 3});
+  }
+
+  // Tail. Chunks are 8192 rows so this only runs on the final partial chunk,
+  // but getting it wrong would drop up to three facts — exactly the kind of
+  // silent wrongness the differential test exists to catch.
+  scan_scalar(i, end, valid_at, s, sys_from, sys_to, valid_from, valid_to, out);
+}
+#endif
+
+}  // namespace
+
+void Store::as_of_with(Kernel kernel, Timestamp valid_at, TxnId sys_at,
+                       std::vector<FactId>& out, ScanStats* stats) const {
   const u32 s = sys_at.v;
   const u32 row_limit = upper_row_for_txn(s);
 
@@ -161,28 +244,27 @@ void Store::as_of(Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
 
     const u32 end = std::min(begin + kChunkRows, row_limit);
 
-    // The visibility predicate. Written scalar and branch-free: all four
-    // operands are 32-bit, so this is the loop that -msimd128 vectorises and
-    // the one the SIMD pass in Phase 8 rewrites by hand. Both versions must
-    // agree with the reference store.
-    for (u32 i = begin; i < end; ++i) {
-      // Bitwise & on deliberately int-ified comparisons, not &&. Short-circuit
-      // would introduce a data-dependent branch per row, and at ~50% match
-      // rates the branch predictor cannot help — the mispredicts cost more
-      // than evaluating both sides always. Casting to int also states the
-      // intent explicitly, which is what -Wbitwise-instead-of-logical asks for.
-      const int known_then =
-          static_cast<int>(sys_from_[i] <= s) & static_cast<int>(s < sys_to_[i]);
-      const int true_then = static_cast<int>(valid_from_[i] <= valid_at) &
-                            static_cast<int>(valid_at < valid_to_[i]);
-      if ((known_then & true_then) != 0) out.push_back(FactId{i});
+#ifdef __wasm_simd128__
+    if (kernel == Kernel::Simd) {
+      scan_simd(begin, end, valid_at, s, sys_from_, sys_to_, valid_from_, valid_to_, out);
+    } else {
+      scan_scalar(begin, end, valid_at, s, sys_from_, sys_to_, valid_from_, valid_to_, out);
     }
+#else
+    (void)kernel;
+    scan_scalar(begin, end, valid_at, s, sys_from_, sys_to_, valid_from_, valid_to_, out);
+#endif
 
     local.rows_scanned += end - begin;
   }
 
   local.rows_matched = static_cast<u32>(out.size());
   if (stats) *stats = local;
+}
+
+void Store::as_of(Timestamp valid_at, TxnId sys_at, std::vector<FactId>& out,
+                  ScanStats* stats) const {
+  as_of_with(simd_available() ? Kernel::Simd : Kernel::Scalar, valid_at, sys_at, out, stats);
 }
 
 bool Store::visible_at(FactId f, Timestamp valid_at, TxnId sys_at) const noexcept {
@@ -219,9 +301,9 @@ u32 Store::txn_at_or_before(i64 wall_clock_unix) const noexcept {
 
   // Transactions are appended in ascending wall-clock order — the ingest layer
   // sorts batches before committing precisely so this invariant holds — so a
-  // binary search is valid. If it were ever violated the result would be
-  // wrong rather than crashing, which is why the ordering is enforced at the
-  // one place batches are built.
+  // binary search is valid. If it were ever violated the result would be wrong
+  // rather than crashing, which is why the ordering is enforced at the one
+  // place batches are built.
   usize lo = 0, hi = txns_.size();
   while (lo < hi) {
     const usize mid = lo + (hi - lo) / 2;

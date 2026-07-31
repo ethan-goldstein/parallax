@@ -102,6 +102,31 @@ export class Heap {
     return heap.subarray(start, start + floatCount)
   }
 
+  /** Uint32Array over `count` u32 at `ptr`. Used by the benchmark to read the
+   *  engine's own columns without copying. */
+  viewU32(ptr: number, count: number): Uint32Array {
+    const heap = this.#module.HEAPU32
+    if (heap.byteLength === 0) throw new HeapAccessError('HEAPU32 is detached.')
+    if (ptr % 4 !== 0) throw new HeapAccessError(`pointer ${ptr} is not 4-byte aligned`)
+    const start = ptr >>> 2
+    if (start + count > heap.length) {
+      throw new HeapAccessError(`u32 view exceeds heap length ${heap.length}`)
+    }
+    return heap.subarray(start, start + count)
+  }
+
+  /** Int32Array over `count` i32 at `ptr`. */
+  viewI32(ptr: number, count: number): Int32Array {
+    const heap = this.#module.HEAP32
+    if (heap.byteLength === 0) throw new HeapAccessError('HEAP32 is detached.')
+    if (ptr % 4 !== 0) throw new HeapAccessError(`pointer ${ptr} is not 4-byte aligned`)
+    const start = ptr >>> 2
+    if (start + count > heap.length) {
+      throw new HeapAccessError(`i32 view exceeds heap length ${heap.length}`)
+    }
+    return heap.subarray(start, start + count)
+  }
+
   viewU8(ptr: number, byteCount: number): Uint8Array {
     const heap = this.#module.HEAPU8
     if (heap.byteLength === 0) {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "px/bench.hpp"
 #include "px/symbols.hpp"
@@ -233,8 +234,15 @@ Resolution resolve(const std::vector<Record>& records, const ErConfig& cfg,
   UnionFind uf(n);
   // Deduplicate pairs: a pair sharing both a geo and a time key would
   // otherwise be scored twice and appear twice in the evidence list.
-  std::vector<u64> seen;
-  seen.reserve(n * 4);
+  //
+  // A hash set, NOT a sorted vector with std::find. The first version was a
+  // linear scan over a growing vector, which makes the whole pass quadratic in
+  // the number of candidate pairs — it measured 4.0 SECONDS for 30k records in
+  // the benchmark, and the cost was entirely in this lookup rather than in any
+  // of the scoring. Constant-time membership is the difference between
+  // resolution being interactive and being a batch job.
+  std::unordered_set<u64> seen;
+  seen.reserve(static_cast<usize>(n) * 4);
 
   for (auto& [key, bucket] : blocks) {
     if (bucket.size() < 2) continue;
@@ -259,8 +267,7 @@ Resolution resolve(const std::vector<Record>& records, const ErConfig& cfg,
         if (cfg.cross_source_only && records[a].source == records[b].source) continue;
 
         const u64 pair_key = (static_cast<u64>(a) << 32) | b;
-        if (std::find(seen.begin(), seen.end(), pair_key) != seen.end()) continue;
-        seen.push_back(pair_key);
+        if (!seen.insert(pair_key).second) continue;
 
         Pair p = score_pair(records[a], records[b], cfg, symbols);
         p.a = a;

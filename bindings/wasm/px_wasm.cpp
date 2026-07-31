@@ -18,6 +18,10 @@
 #include <memory>
 #include <string>
 
+#include <algorithm>
+#include <vector>
+
+#include "px/bench.hpp"
 #include "px/session.hpp"
 #include "px/version.hpp"
 
@@ -194,6 +198,92 @@ void unmerge_pair(u32 pair_index) {
   session().unmerge_pair(pair_index);
 }
 
+// ── in-browser benchmark ───────────────────────────────────────────────────
+//
+// The point of running this in the visitor's browser rather than quoting a
+// number from my machine: there is nothing to take on trust. The same
+// predicate runs over the same memory in both languages, on their hardware,
+// right now.
+
+struct JsBenchResult {
+  double scalarMs = 0;
+  double simdMs = 0;
+  u32 rowsScanned = 0;
+  u32 rowsMatched = 0;
+  bool simdAvailable = false;
+  /// Heap addresses of the four predicate columns, so JS can run the identical
+  /// loop over the identical bytes.
+  u32 sysFromPtr = 0;
+  u32 sysToPtr = 0;
+  u32 validFromPtr = 0;
+  u32 validToPtr = 0;
+  u32 factCount = 0;
+  /// How many repetitions the timing was averaged over — reported so the
+  /// measurement can be judged rather than trusted.
+  u32 reps = 0;
+  int validAt = 0;
+  u32 sysAt = 0;
+};
+
+JsBenchResult bench_scan(int target_ms) {
+  px::Store& st = session().store();
+  JsBenchResult r;
+  r.factCount = static_cast<u32>(st.fact_count());
+  r.simdAvailable = px::Store::simd_available();
+  if (r.factCount == 0) return r;
+
+  // A (T, S) at which nothing is prunable, so the kernel is measured doing
+  // real work on every row rather than the zone maps being measured instead.
+  r.validAt = px::kTimeMax - 1;
+  r.sysAt = st.current_txn().v;
+
+  std::vector<px::FactId> out;
+  out.reserve(r.factCount);
+
+  // REPEAT UNTIL MEASURABLE, then divide.
+  //
+  // Browsers deliberately coarsen performance.now() — typically to ~100 us, as
+  // a Spectre mitigation. A single scan over ~12k rows takes far less than
+  // that, so timing one iteration measured a single timer tick: the first
+  // version reported 0.1 ms for scalar and 0.0 ms for SIMD, which is noise
+  // wearing the costume of a result.
+  //
+  // Running until the clock has advanced well past its own resolution and
+  // dividing by the repetition count is the standard fix, and it is why this
+  // takes a target duration rather than an iteration count.
+  auto run = [&](px::Store::Kernel k) {
+    // Warmup: one pass to fault in pages and warm caches.
+    out.clear();
+    st.as_of_with(k, r.validAt, px::TxnId{r.sysAt}, out, nullptr);
+
+    const double budget = target_ms > 0 ? target_ms : 50;
+    const double t0 = px::now_ms();
+    int reps = 0;
+    double elapsed = 0;
+    do {
+      out.clear();
+      px::ScanStats s{};
+      st.as_of_with(k, r.validAt, px::TxnId{r.sysAt}, out, &s);
+      r.rowsScanned = s.rows_scanned;
+      r.rowsMatched = static_cast<u32>(out.size());
+      ++reps;
+      elapsed = px::now_ms() - t0;
+    } while (elapsed < budget && reps < 100000);
+
+    r.reps = reps;
+    return reps > 0 ? elapsed / reps : 0.0;
+  };
+
+  r.scalarMs = run(px::Store::Kernel::Scalar);
+  if (r.simdAvailable) r.simdMs = run(px::Store::Kernel::Simd);
+
+  r.sysFromPtr = heap_addr(st.sys_from_data());
+  r.sysToPtr = heap_addr(st.sys_to_data());
+  r.validFromPtr = heap_addr(st.valid_from_data());
+  r.validToPtr = heap_addr(st.valid_to_data());
+  return r;
+}
+
 JsScanStats last_scan() {
   const px::ScanStats& s = session().last_scan();
   return JsScanStats{s.chunks_total, s.chunks_skipped, s.rows_scanned, s.rows_matched,
@@ -279,6 +369,22 @@ EMSCRIPTEN_BINDINGS(parallax) {
       .field("blocksSkipped", &JsErStats::blocksSkipped)
       .field("elapsedMs", &JsErStats::elapsedMs);
 
+  emscripten::value_object<JsBenchResult>("BenchResult")
+      .field("scalarMs", &JsBenchResult::scalarMs)
+      .field("simdMs", &JsBenchResult::simdMs)
+      .field("rowsScanned", &JsBenchResult::rowsScanned)
+      .field("rowsMatched", &JsBenchResult::rowsMatched)
+      .field("simdAvailable", &JsBenchResult::simdAvailable)
+      .field("sysFromPtr", &JsBenchResult::sysFromPtr)
+      .field("sysToPtr", &JsBenchResult::sysToPtr)
+      .field("validFromPtr", &JsBenchResult::validFromPtr)
+      .field("validToPtr", &JsBenchResult::validToPtr)
+      .field("factCount", &JsBenchResult::factCount)
+      .field("reps", &JsBenchResult::reps)
+      .field("validAt", &JsBenchResult::validAt)
+      .field("sysAt", &JsBenchResult::sysAt);
+
+  emscripten::function("benchScan", &bench_scan);
   emscripten::function("setPurpose", &set_purpose);
   emscripten::function("setSensitivity", &set_sensitivity);
   emscripten::function("auditLog", &audit_log);

@@ -13,6 +13,7 @@ import { fetchEmsc, buildEmscBatches } from './sources/emsc'
 import { licenseObligations, SOURCES } from './sources/registry'
 import { buildBatches, EntityRegistry, fetchQuakes, USGS_FEEDS, type Batch } from './sources/usgs'
 import { renderAudit, type AuditLog } from './ui/audit'
+import { runBenchmark } from './ui/bench'
 import { renderEvidence, type MergeEvidence } from './ui/evidence'
 import { renderExplain, type ExplainPlan } from './ui/explain'
 import { Scrubber } from './ui/scrubber'
@@ -53,6 +54,9 @@ app.innerHTML = `
   <section id="explain" class="explain"></section>
   <section id="evidence" class="evidence"></section>
   <section id="audit" class="audit"></section>
+  <section id="bench" class="bench">
+    <button id="bench-run" class="bench-run" type="button">run benchmark on your machine</button>
+  </section>
 
   <aside class="hud panel layers" id="layers"></aside>
   <aside id="readout" class="hud panel readout" aria-live="polite"></aside>
@@ -544,6 +548,11 @@ async function main(): Promise<void> {
   }
 
   refreshAudit()
+
+  const benchHost = document.querySelector<HTMLElement>('#bench')!
+  document.querySelector<HTMLButtonElement>('#bench-run')!.addEventListener('click', () => {
+    runBenchmark(engine, benchHost)
+  })
 
   Object.assign(window, {
     __parallax: { engine, globe, scrubber, refresh, runQuery, refreshAudit },
