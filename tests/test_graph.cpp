@@ -7,6 +7,10 @@
 // selected entity and paths between two — so they move to a file named after
 // what they test.
 // ────────────────────────────────────────────────────────────────────────────
+// <algorithm> for std::find. libc++ pulls it in transitively through <vector>
+// and libstdc++ does not, so omitting it builds clean on macOS and fails on the
+// Linux CI runner — which is the whole reason the build is two-target.
+#include <algorithm>
 #include <vector>
 
 #include <doctest.h>
