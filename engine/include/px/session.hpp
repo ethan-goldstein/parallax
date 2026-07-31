@@ -34,6 +34,34 @@ struct IngestResult {
   TxnId txn{};
 };
 
+/// How a query is run, beyond the SQL itself.
+///
+/// Both halves exist for the same caller: a UI where the scrubber owns the two
+/// time axes and the query text describes only WHAT to select.
+///
+/// Namespace scope rather than nested in Session, because a nested type's
+/// default member initializers are not complete inside the enclosing class
+/// definition — which is exactly where the defaulted parameter needs them.
+struct QueryOptions {
+  /// Pins both axes to the scrubber's position. `sys_at` is a transaction
+  /// INDEX, not a clock — see ql::PlanContext for why that distinction is
+  /// load-bearing.
+  bool has_time_override = false;
+  Timestamp valid_at = 0;
+  u32 sys_at = 0;
+
+  /// Whether this run is recorded in the audit trail.
+  ///
+  /// Dragging the scrubber re-asks one query at sixty instants a second. That is
+  /// a single question being explored, not sixty questions being asked, and
+  /// recording each frame would bury the trail under its own noise — an audit
+  /// log nobody can read answers no better than one that was never kept. The
+  /// query is still fully policy-checked on every run; only the RECORD is
+  /// suppressed, and only while the query text is unchanged. Refusals are
+  /// recorded regardless.
+  bool record = true;
+};
+
 class Session {
  public:
   /// `max_points` fixes the render buffer capacity for the lifetime of the
@@ -129,7 +157,7 @@ class Session {
   };
 
   /// Parses, plans, executes, and packs the result for rendering.
-  QueryOutcome run_query(std::string_view sql, i64 now_unix);
+  QueryOutcome run_query(std::string_view sql, i64 now_unix, const QueryOptions& opts = {});
 
   // ── policy and audit ─────────────────────────────────────────────────────
 

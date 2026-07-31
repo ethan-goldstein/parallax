@@ -139,6 +139,25 @@ struct PlanContext {
 
   /// Latest transaction, used when the query does not pin a system time.
   u32 current_txn = 0;
+
+  /// Pins the temporal axes, overriding both the defaults and the query's own
+  /// `as of` clause.
+  ///
+  /// This exists because the scrubber, not the query text, is the authority on
+  /// where the session is in time. Re-running a query at a new instant by
+  /// rewriting its SQL would mean round-tripping the system axis through a wall
+  /// clock — and the system axis is a transaction INDEX, not a clock. Several
+  /// transactions routinely share a wall-clock second (the live feeds all land
+  /// in the same minute bucket), so `txn_at_or_before` would resolve back to the
+  /// last of those, not the one the user selected. Passing the index directly is
+  /// the only way for the two axes to mean exactly what the scrubber shows.
+  ///
+  /// Applied before access-path selection so the plan's cardinality estimates
+  /// describe the instant actually executed — otherwise EXPLAIN would compare an
+  /// estimate for one moment against an actual for another.
+  bool has_time_override = false;
+  Timestamp valid_at_override = 0;
+  u32 sys_at_override = 0;
 };
 
 /// Cost model constants, in arbitrary units calibrated so a sequential row

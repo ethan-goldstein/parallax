@@ -212,6 +212,8 @@ export const digitrafficSpec: SourceSpec<VesselFetch> = {
   label: 'maritime · digitraffic',
   layer: 'maritime',
   coverageNote: 'Baltic and Gulf of Finland only, not global',
+  // A vessel under way changes position meaningfully over a minute, not a second.
+  pollSeconds: 60,
   attributes: [
     { name: 'vessel_position', sensitivity: Sensitivity.Precise },
     { name: 'speed', sensitivity: Sensitivity.Public },

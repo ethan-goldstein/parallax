@@ -546,7 +546,8 @@ void Session::register_source(std::string_view name, SymbolId geo_attr,
   sources_.push_back(SourceBinding{std::string(name), geo_attr, scalar_attr});
 }
 
-Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
+Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix,
+                                         const QueryOptions& opts) {
   QueryOutcome out;
   out.batch.generation = generation_;
 
@@ -581,6 +582,9 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
   ctx.geo_attr = binding->geo_attr;
   ctx.scalar_attr = binding->scalar_attr;
   ctx.current_txn = store_.current_txn().v;
+  ctx.has_time_override = opts.has_time_override;
+  ctx.valid_at_override = opts.valid_at;
+  ctx.sys_at_override = opts.sys_at;
 
   ql::Plan plan = ql::plan_query(pr.query, ctx);
   if (!plan.ok()) {
@@ -624,7 +628,9 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
     out.explain = ql::explain_json(plan);
 
     // A refused query is still an event worth recording — arguably more so
-    // than an allowed one.
+    // than an allowed one. A refusal is recorded even on a silent re-run: the
+    // suppression is for repetition of an ALLOWED question, and losing the fact
+    // that something was refused is exactly the gap an audit trail must not have.
     record_audit(sql, decision, 0, now_unix);
     return out;
   }
@@ -694,7 +700,7 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
   // test asserting "every query is recorded" is what caught it.
   //
   // Written after the result is packed, so the row count is the real one.
-  record_audit(sql, decision, written, now_unix);
+  if (opts.record) record_audit(sql, decision, written, now_unix);
   return out;
 }
 

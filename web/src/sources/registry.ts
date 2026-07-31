@@ -33,6 +33,81 @@ export interface SourceMeta {
 }
 
 export const SOURCES: Record<string, SourceMeta> = {
+  // Ids are written into every fact and persisted, so they are never renumbered.
+  // 7 is the next free one.
+  recon: {
+    id: 11,
+    key: 'recon',
+    name: 'Network lookups — DNS.google, RDAP.org, RIPEstat, Shodan InternetDB, MITRE CVE',
+    url: 'https://internetdb.shodan.io/',
+    // InternetDB is the one with terms worth surfacing: free for
+    // non-commercial use with attribution. Declaring it means the obligations
+    // panel updates in response to a lookup a person just ran, which is the
+    // licence machinery demonstrating itself.
+    license: 'Mixed: mostly public/free APIs; Shodan InternetDB is non-commercial with attribution',
+    spdx: 'NOASSERTION',
+    attribution: 'DNS by Google Public DNS; RDAP via rdap.org; AS data from RIPE NCC; host index from Shodan InternetDB; CVE records from MITRE',
+    shareAlike: false,
+    nonCommercial: true,
+    typicalMs: 500,
+  },
+
+  celestrak: {
+    id: 10,
+    key: 'celestrak',
+    name: 'CelesTrak — orbital element sets',
+    url: 'https://celestrak.org/',
+    license: 'Free redistribution with attribution',
+    spdx: 'NOASSERTION',
+    attribution: 'Orbital data from CelesTrak (T.S. Kelso)',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 900,
+  },
+
+  nws: {
+    id: 9,
+    key: 'nws',
+    name: 'NOAA / National Weather Service',
+    url: 'https://api.weather.gov/',
+    license: 'Public domain (US Government work)',
+    spdx: 'CC-PDDC',
+    attribution: 'NOAA National Weather Service',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 700,
+  },
+
+  // Two entries, not one, even though both read the same committed file: `key`
+  // is how a FeedStatus finds its licence AND how the scheduler tracks a fetch,
+  // so two specs sharing a key would collide in both. They are also genuinely
+  // two datasets — a berth and a strait are not the same kind of object.
+  ports: {
+    id: 7,
+    key: 'ports',
+    name: 'PARALLAX curated port reference',
+    url: 'https://github.com/ethan-goldstein/parallax',
+    license: 'Authored for this project — CC0',
+    spdx: 'CC0-1.0',
+    attribution: 'PARALLAX curated dataset',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 20,
+  },
+
+  chokepoints: {
+    id: 8,
+    key: 'chokepoints',
+    name: 'PARALLAX curated chokepoint reference',
+    url: 'https://github.com/ethan-goldstein/parallax',
+    license: 'Authored for this project — CC0',
+    spdx: 'CC0-1.0',
+    attribution: 'PARALLAX curated dataset',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 20,
+  },
+
   usgs: {
     id: 0,
     key: 'usgs',
@@ -143,9 +218,15 @@ export function licenseObligations(sourceIds: readonly number[]): string[] {
   const notes: string[] = []
   const used = SOURCE_BY_ID.filter((s) => sourceIds.includes(s.id))
 
-  const attributed = used.filter((s) => s.spdx !== 'CC-PDDC')
+  // Deduped by attribution TEXT, not by source. Two sources can share one
+  // credit — the ports and chokepoint datasets are two feeds out of one authored
+  // file — and naming that credit twice reads as a bug in the panel whose whole
+  // job is to be precise about credit.
+  const attributed = [
+    ...new Set(used.filter((s) => s.spdx !== 'CC-PDDC').map((s) => s.attribution)),
+  ]
   if (attributed.length > 0) {
-    notes.push(`Attribution required: ${attributed.map((s) => s.attribution).join('; ')}`)
+    notes.push(`Attribution required: ${attributed.join('; ')}`)
   }
   const sa = used.filter((s) => s.shareAlike)
   if (sa.length > 0) {

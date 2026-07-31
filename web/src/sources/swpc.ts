@@ -176,6 +176,9 @@ export const swpcSpec: SourceSpec<AuroraFetch> = {
   label: 'aurora · swpc',
   layer: 'aurora',
   coverageNote: `forecast ~80 min ahead, ≥${MIN_PROBABILITY}% only`,
+  // OVATION publishes a new grid every five minutes; asking more often returns
+  // the same forecast, which the duplicate guard would drop anyway.
+  pollSeconds: 300,
   attributes: [
     { name: 'aurora_position', sensitivity: Sensitivity.Public },
     { name: 'aurora_probability', sensitivity: Sensitivity.Public },

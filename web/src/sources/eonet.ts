@@ -178,6 +178,12 @@ export const eonetSpec: SourceSpec<{ events: EonetEvent[]; rejected: number }> =
   key: 'eonet',
   label: 'natural events · eonet',
   layer: 'events',
+  // EONET publishes no revision field, so `buildEonetBatches` stamps system time
+  // with the fetch clock. Declared here so the duplicate guard knows not to treat
+  // that invented timestamp as evidence of a revision.
+  systemTimeIsFetchTime: true,
+  // Curated by hand at NASA; new events appear over hours, not seconds.
+  pollSeconds: 600,
   coverageNote: 'wildfires, volcanoes, storms, ice — uniform size, units differ',
   attributes: [
     { name: 'event_position', sensitivity: Sensitivity.Public },

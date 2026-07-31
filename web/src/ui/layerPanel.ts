@@ -13,9 +13,22 @@
 // Structure is layer-first, sources nested under it. That mirrors what a viewer
 // sees: one visual thing on the map, fed by one or more agencies. USGS and EMSC
 // are two rows under one checkbox because they are two views of one layer.
+//
+// ── why the detail collapses ────────────────────────────────────────────────
+//
+// Each layer has four things to say: whether it is on, what its colour encodes,
+// which agencies feed it, and where its coverage is not what you would assume.
+// Rendered flat that is roughly 150px per layer, so four layers overflowed the
+// panel and the fourth was below the fold — which is how a viewer concluded the
+// map had no maritime or aviation data at all.
+//
+// The head row alone answers "what is on the map"; everything else is a follow-up
+// question and lives behind a disclosure. Native <details> rather than a class
+// toggle, because it gets keyboard operation and the open/closed state for free,
+// and because find-in-page can reach into a closed one.
 // ────────────────────────────────────────────────────────────────────────────
 import type { LayerDef } from '../sources/spec'
-import { CATEGORIES, type Category, type FeedStatus } from '../sources/spec'
+import { type Category, type FeedStatus } from '../sources/spec'
 
 function escapeHtml(s: string): string {
   return s.replace(
@@ -70,6 +83,27 @@ export interface LayerPanelOptions {
   visible: Readonly<Record<string, boolean>>
   counts: Readonly<Record<string, number>>
   onToggle: (layer: string, visible: boolean) => void
+  /** Render only this category. Omitted renders every one, in CATEGORIES order. */
+  category?: Category
+  /**
+   * Refresh timings by source key.
+   *
+   * Shown because invisible polling might as well not be happening: a viewer who
+   * cannot tell a live feed from a frozen one has no reason to believe either.
+   */
+  timings?: ReadonlyMap<string, { lastFetch: number | null; nextDue: number | null }>
+}
+
+/** `12s ago · next in 8s`, or null when the source is fetched once at boot. */
+function cadence(
+  t: { lastFetch: number | null; nextDue: number | null } | undefined,
+  now: number,
+): string | null {
+  if (!t || t.nextDue === null) return null
+  const parts: string[] = []
+  if (t.lastFetch !== null) parts.push(`${Math.max(0, Math.round(now - t.lastFetch))}s ago`)
+  parts.push(`next in ${Math.max(0, Math.round(t.nextDue - now))}s`)
+  return parts.join(' · ')
 }
 
 /**
@@ -90,7 +124,8 @@ export function updateLayerCounts(
 }
 
 export function renderLayerPanel(opts: LayerPanelOptions): void {
-  const { host, layers, feeds, visible, counts, onToggle } = opts
+  const { host, layers, feeds, visible, counts, onToggle, category, timings } = opts
+  const now = Date.now() / 1000
 
   const byLayer = new Map<string, FeedStatus[]>()
   for (const f of feeds) {
@@ -99,64 +134,84 @@ export function renderLayerPanel(opts: LayerPanelOptions): void {
     else byLayer.set(f.layer, [f])
   }
 
-  const sections: string[] = []
+  const inScope = category ? layers.filter((l) => l.category === category) : layers
 
-  for (const category of CATEGORIES as readonly Category[]) {
-    const inCategory = layers.filter((l) => l.category === category)
-    if (inCategory.length === 0) continue
+  host.innerHTML = inScope
+    .map((layer) => {
+      const sources = byLayer.get(layer.name) ?? []
+      // A layer whose every source failed is shown, disabled, with the reason.
+      // Hiding it would make a partial picture look complete.
+      const live = sources.filter((s) => !s.error)
+      const dead = live.length === 0
+      const total = counts[layer.name] ?? 0
 
-    const blocks = inCategory
-      .map((layer) => {
-        const sources = byLayer.get(layer.name) ?? []
-        // A layer whose every source failed is shown, disabled, with the reason.
-        // Hiding it would make a partial picture look complete.
-        const live = sources.filter((s) => !s.error)
-        const total = counts[layer.name] ?? 0
+      // The checkbox lives inside the <summary>, so a click on it would also
+      // toggle the disclosure. Suppressed below rather than moved out, because
+      // "the control and its name are one row" is worth one event listener.
+      const head = `<summary class="layer-head">
+          <input type="checkbox" data-layer="${escapeHtml(layer.name)}"
+                 ${dead ? 'disabled' : ''}
+                 ${visible[layer.name] === false ? '' : 'checked'}
+                 aria-label="${escapeHtml(layer.label)}" />
+          <span class="hud-label">${escapeHtml(layer.label)}</span>
+          <span class="v" data-layer-count="${escapeHtml(layer.name)}">${
+            dead ? '—' : compact(total)
+          }</span>
+          <svg class="layer-chev" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M6 4l4 4-4 4"/>
+          </svg>
+        </summary>`
 
-        const head = `<label class="layer-head">
-            <input type="checkbox" data-layer="${escapeHtml(layer.name)}"
-                   ${live.length === 0 ? 'disabled' : ''}
-                   ${visible[layer.name] === false ? '' : 'checked'} />
-            <span class="hud-label">${escapeHtml(layer.label)}</span>
-            <span class="v" data-layer-count="${escapeHtml(layer.name)}">${
-              live.length === 0 ? '—' : compact(total)
-            }</span>
-          </label>`
+      // Only worth listing sources when there is more than one, or when the
+      // single one has something to report.
+      const srcRows =
+        sources.length > 1 || sources.some((s) => s.error)
+          ? sources
+              .map((s) => {
+                const rate = cadence(timings?.get(s.key), now)
+                return `<div class="layer-src ${s.error ? 'dead' : ''}">
+                    <span>${escapeHtml(s.label.split('·').pop()?.trim() ?? s.label)}</span>
+                    <span class="${s.error ? 'bad' : ''}">${
+                      s.error ? escapeHtml(s.error.slice(0, 24)) : s.count.toLocaleString()
+                    }</span>
+                    ${rate ? `<span class="layer-rate">${escapeHtml(rate)}</span>` : ''}
+                  </div>`
+              })
+              .join('')
+          : sources
+              .map((s) => {
+                const rate = cadence(timings?.get(s.key), now)
+                return rate ? `<div class="layer-src"><span class="layer-rate">${escapeHtml(rate)}</span></div>` : ''
+              })
+              .join('')
 
-        // Only worth listing sources when there is more than one, or when the
-        // single one has something to report.
-        const srcRows =
-          sources.length > 1 || sources.some((s) => s.error)
-            ? sources
-                .map(
-                  (s) => `<div class="layer-src ${s.error ? 'dead' : ''}">
-                      <span>${escapeHtml(s.label.split('·').pop()?.trim() ?? s.label)}</span>
-                      <span class="${s.error ? 'bad' : ''}">${
-                        s.error ? escapeHtml(s.error.slice(0, 24)) : s.count.toLocaleString()
-                      }</span>
-                    </div>`,
-                )
-                .join('')
-            : ''
+      const note = sources.find((s) => s.coverageNote)?.coverageNote
+      const noteRow = note ? `<div class="layer-note">${escapeHtml(note)}</div>` : ''
 
-        const note = sources.find((s) => s.coverageNote)?.coverageNote
-        const noteRow = note ? `<div class="layer-note">${escapeHtml(note)}</div>` : ''
+      // A layer holding facts none of which are valid at the instant the
+      // scrubber is on renders zero points, and a bare "0" is indistinguishable
+      // from a broken feed. The aurora layer is permanently in this state on
+      // arrival — it forecasts about eighty minutes ahead, so at the present
+      // instant it is correctly empty. Saying so turns a confusing zero into the
+      // clearest possible statement of what the valid axis is FOR.
+      const ingested = sources.reduce((n, s) => n + s.count, 0)
+      const timeNote =
+        !dead && total === 0 && ingested > 0
+          ? `<div class="layer-note layer-elsewhere">${ingested.toLocaleString()} facts held, none valid at the instant the scrubber is on — drag the valid axis to reach them</div>`
+          : ''
 
-        return `<div class="layer-block">${head}${legend(layer)}${srcRows}${noteRow}</div>`
-      })
-      .join('')
-
-    sections.push(
-      `<div class="layer-group">
-         <div class="layer-group-title hud-label">${category}</div>
-         ${blocks}
-       </div>`,
-    )
-  }
-
-  host.innerHTML = sections.join('')
+      // A dead layer opens by default: the reason it is dead is the only thing
+      // worth reading about it, and hiding that behind a disclosure would make a
+      // broken feed look like a feed with nothing in it.
+      return `<details class="layer-block"${dead ? ' open' : ''}>
+          ${head}
+          <div class="layer-detail">${legend(layer)}${srcRows}${timeNote}${noteRow}</div>
+        </details>`
+    })
+    .join('')
 
   host.querySelectorAll<HTMLInputElement>('input[data-layer]').forEach((cb) => {
+    cb.addEventListener('click', (e) => e.stopPropagation())
     cb.addEventListener('change', () => onToggle(cb.dataset.layer!, cb.checked))
   })
 }

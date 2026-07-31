@@ -322,3 +322,75 @@ TEST_CASE("inspect surfaces every version, and resolves symbols to text") {
   CHECK(has(j, "\"history\":["));
   CHECK(has(j, "\"attributes\":["));
 }
+
+// ── query-time overrides ───────────────────────────────────────────────────
+//
+// The UI's scrubber owns both time axes; the query text says only WHAT to
+// select. These two cases pin the reasons that has to be a parameter rather
+// than string surgery on the SQL.
+
+TEST_CASE("run_query overrides pin the system axis by transaction index") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+  s.register_source("things", pos, SymbolId{});
+
+  std::vector<wire::Fact> first{geo_fact(1, pos.v, 10.0, 20.0, 0, kOpenValid)};
+  s.ingest(0, stage(s, first), 1000);
+  const u32 txn1 = s.store().current_txn().v;
+
+  // Deliberately the SAME wall clock as txn1. This is the case that makes the
+  // override necessary rather than merely convenient: an `as of ... @ <clock>`
+  // clause would round-trip through txn_at_or_before and land on txn2, because
+  // that is the last transaction at or before that second. In the real app the
+  // live feeds all bucket into the current minute, so this tie is the common
+  // case at exactly the end of the axis the scrubber opens on.
+  std::vector<wire::Fact> second{geo_fact(2, pos.v, 30.0, 40.0, 0, kOpenValid)};
+  s.ingest(0, stage(s, second), 1000);
+  const u32 txn2 = s.store().current_txn().v;
+  s.finish_ingest();
+
+  REQUIRE(txn1 != txn2);
+
+  QueryOptions at_first;
+  at_first.has_time_override = true;
+  at_first.valid_at = 50;
+  at_first.sys_at = txn1;
+  CHECK(s.run_query("things", 0, at_first).batch.count == 1);
+
+  QueryOptions at_second = at_first;
+  at_second.sys_at = txn2;
+  CHECK(s.run_query("things", 0, at_second).batch.count == 2);
+
+  // The override must also beat an explicit `as of` in the SQL — otherwise the
+  // scrubber and the query text would each believe they were authoritative.
+  CHECK(s.run_query("things as of \"2038-01-01T00:00:00\"", 0, at_first).batch.count == 1);
+}
+
+TEST_CASE("a silent re-run executes but is not recorded") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+  s.register_source("things", pos, SymbolId{});
+
+  std::vector<wire::Fact> facts{geo_fact(1, pos.v, 10.0, 20.0, 0, kOpenValid)};
+  s.ingest(0, stage(s, facts), 1000);
+  s.finish_ingest();
+
+  QueryOptions silent;
+  silent.has_time_override = true;
+  silent.valid_at = 50;
+  silent.sys_at = s.store().current_txn().v;
+  silent.record = false;
+
+  // Sixty of these is one scrubber drag. The result is real every time; only
+  // the audit write is suppressed.
+  for (int i = 0; i < 60; ++i) {
+    CHECK(s.run_query("things", 0, silent).batch.count == 1);
+  }
+  CHECK(!has(s.audit_json(50), "\"query\""));
+
+  // The same query, asked rather than scrubbed, is recorded.
+  QueryOptions recorded = silent;
+  recorded.record = true;
+  s.run_query("things", 0, recorded);
+  CHECK(has(s.audit_json(50), "things"));
+}

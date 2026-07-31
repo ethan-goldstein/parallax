@@ -10,10 +10,18 @@ than rediscovered from the code. Each says what was decided, what it cost, and w
 | [0003](0003-z-order-over-an-r-tree.md) | Z-order curve rather than an R-tree | 4a |
 | [0004](0004-policy-refusal-at-plan-time.md) | Policy is enforced at plan time, not on output rows | 7 |
 | [0005](0005-maplibre-as-renderer-host.md) | MapLibre hosts the renderer; the zero-copy path stays | 9 |
+| [0006](0006-the-scrubber-owns-both-axes.md) | The scrubber owns both axes; the engine takes them as parameters | 10 |
+| [0007](0007-recon-lookups-are-facts.md) | Network lookups are ingested as facts, not rendered in a panel | 10 |
 
 0001, 0003 and 0004 are a chain: system time is monotone and a Z-order range is contiguous, which
 makes two of the four cardinality estimators exact, which is the only reason refusing a query
 before reading a row is sound rather than a guess.
+
+0006 is downstream of 0001 and is the clearest case yet for it: because system time is a transaction
+id rather than a timestamp, the scrubber's position cannot be expressed as a wall clock without loss —
+49 of the last 50 transactions in a live session shared a second with another. 0007 is downstream of
+0004, in that it takes the argument for auditing policy decisions as facts and applies it to the other
+thing this application does on a user's behalf.
 
 0005 is the one reversal in the set. It supersedes the rationale that used to sit in the header of
 `web/src/render/globe.ts`, and it is recorded rather than quietly edited because the original

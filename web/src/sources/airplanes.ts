@@ -33,7 +33,7 @@
 import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import { bucketBatches, type Batch, type EntityRegistry } from './batch'
 import { SOURCES } from './registry'
-import { Sensitivity, type SourceSpec } from './spec'
+import { Sensitivity, type SourceSpec, type Viewport } from './spec'
 
 export const AIRPLANES_MIL_URL = 'https://api.airplanes.live/v2/mil'
 
@@ -176,6 +176,10 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
   label: 'military air · adsb',
   layer: 'aviation',
   coverageNote: 'self-declared military ADS-B only, no civil traffic',
+  // Twenty seconds. An aircraft at 450 kn covers about 4 km in that time, so a
+  // slower cadence would draw it somewhere it demonstrably is not — and a faster
+  // one would take more from a volunteer-funded endpoint than the map can show.
+  pollSeconds: 20,
   attributes: [
     // Precise, for the same reason a vessel position is: this locates one
     // identifiable asset, where an earthquake epicentre locates an event.
@@ -195,6 +199,94 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
           position: ctx.attrs.aircraft_position!,
           altitude: ctx.attrs.altitude!,
           label: ctx.attrs.aircraft_label!,
+        },
+        ctx.intern,
+      ),
+      count: raw.aircraft.length,
+    }
+  },
+}
+
+// ── civil traffic, scoped to the viewport ───────────────────────────────────
+//
+// The military feed above is a global list of a few hundred aircraft, which is
+// small enough to ask for in one go. Civil traffic is not: there are tens of
+// thousands airborne at any moment, and airplanes.live is volunteer-funded.
+// Asking for all of it every twenty seconds would be both useless — the map
+// cannot show it — and rude.
+//
+// So this one asks about the region on screen, and only when the region is small
+// enough for the answer to mean something. Below zoom 4 the viewport is most of a
+// hemisphere and the request is skipped, with the reason stated in the layer
+// panel rather than silently returning nothing: a layer that is empty because
+// you are zoomed out looks identical to a layer that is broken.
+//
+// It reuses SOURCES.airplanes_live: same provider, same terms, same courtesy
+// obligations. The inspector attributing both layers to airplanes.live is true.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Below this the viewport is too large for a point query to be meaningful. */
+const CIVIL_MIN_ZOOM = 4
+
+/** airplanes.live caps a point query at 250 nm. Asking for more is an error. */
+const CIVIL_MAX_RADIUS_NM = 250
+
+export async function fetchCivilAircraft(
+  view: Viewport,
+  signal?: AbortSignal,
+): Promise<{ aircraft: Aircraft[]; rejected: number; skipped: string | null }> {
+  if (view.zoom < CIVIL_MIN_ZOOM) {
+    return { aircraft: [], rejected: 0, skipped: 'zoomed out — civil traffic is viewport-scoped' }
+  }
+  const radiusNm = Math.min(CIVIL_MAX_RADIUS_NM, Math.max(1, Math.round(view.radiusKm / 1.852)))
+  const url =
+    `https://api.airplanes.live/v2/point/` +
+    `${view.centerLat.toFixed(3)}/${view.centerLon.toFixed(3)}/${radiusNm}`
+
+  const { aircraft, rejected } = await fetchMilitaryAircraft(url, signal)
+  return { aircraft, rejected, skipped: null }
+}
+
+export const civilAircraftSpec: SourceSpec<{
+  aircraft: Aircraft[]
+  rejected: number
+  skipped: string | null
+}> = {
+  id: SOURCES.airplanes_live!.id,
+  key: 'airplanes_civil',
+  label: 'civil air · adsb',
+  layer: 'civil',
+  viewport: 'required',
+  coverageNote: `only what is on screen, and only above zoom ${CIVIL_MIN_ZOOM} — pan or zoom in to load more`,
+  pollSeconds: 20,
+  attributes: [
+    // Distinct attribute NAMES, identical SENSITIVITIES.
+    //
+    // The first draft reused `aircraft_position` outright, on the argument that
+    // the policy engine must treat civil and military traffic identically. The
+    // classification argument is right and is kept — position is Precise here
+    // exactly as it is there, and a weaker classification for civil traffic
+    // would be indefensible. But sharing the name made the two indistinguishable
+    // to the engine: a layer is defined by its geometry attribute, so both
+    // layers queried the same attribute and rendered the same 198 aircraft.
+    { name: 'civil_position', sensitivity: Sensitivity.Precise },
+    { name: 'civil_altitude', sensitivity: Sensitivity.Public },
+    { name: 'civil_label', sensitivity: Sensitivity.Public },
+  ],
+  fetch: (signal, view) => {
+    if (!view) throw new Error('civil aircraft needs a viewport')
+    return fetchCivilAircraft(view, signal)
+  },
+  normalize(raw, ctx) {
+    if (raw.skipped !== null) throw new Error(raw.skipped)
+    return {
+      batches: buildAircraftBatches(
+        raw.aircraft,
+        ctx.registry,
+        {
+          position: ctx.attrs.civil_position!,
+          altitude: ctx.attrs.civil_altitude!,
+          label: ctx.attrs.civil_label!,
         },
         ctx.intern,
       ),

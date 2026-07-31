@@ -131,10 +131,7 @@ void register_source(const std::string& name, u32 geo_attr, u32 scalar_attr) {
   session().register_source(name, px::SymbolId{geo_attr}, px::SymbolId{scalar_attr});
 }
 
-JsQueryResult run_query(const std::string& sql, double now_unix) {
-  const px::Session::QueryOutcome r =
-      session().run_query(sql, static_cast<px::i64>(now_unix));
-
+JsQueryResult pack_query(const px::Session::QueryOutcome& r) {
   JsQueryResult out;
   out.ok = r.ok;
   out.error = r.error;
@@ -150,6 +147,28 @@ JsQueryResult run_query(const std::string& sql, double now_unix) {
                            static_cast<u32>(sizeof(px::wire::Point)), r.batch.generation,
                            r.batch.truncated};
   return out;
+}
+
+JsQueryResult run_query(const std::string& sql, double now_unix) {
+  return pack_query(session().run_query(sql, static_cast<px::i64>(now_unix)));
+}
+
+/// The same query, pinned to the scrubber's two axes.
+///
+/// `sys_at` is a transaction INDEX, passed through unconverted. Going via a wall
+/// clock would be lossy: several transactions routinely share a second, so the
+/// index that came back would not be the one the user selected.
+///
+/// `record` is false while only the temporal position is changing, so dragging
+/// the scrubber does not write one audit fact per frame.
+JsQueryResult run_query_at(const std::string& sql, double now_unix, double valid_at,
+                           double sys_at, bool record) {
+  px::QueryOptions opts;
+  opts.has_time_override = true;
+  opts.valid_at = static_cast<px::Timestamp>(valid_at);
+  opts.sys_at = static_cast<px::u32>(sys_at);
+  opts.record = record;
+  return pack_query(session().run_query(sql, static_cast<px::i64>(now_unix), opts));
 }
 
 // ── entity resolution ──────────────────────────────────────────────────────
@@ -409,6 +428,7 @@ EMSCRIPTEN_BINDINGS(parallax) {
 
   emscripten::function("registerSource", &register_source);
   emscripten::function("runQuery", &run_query);
+  emscripten::function("runQueryAt", &run_query_at);
 
   emscripten::function("lastScan", &last_scan);
   emscripten::function("factCount", &fact_count);

@@ -289,6 +289,11 @@ export const usgsSpec: SourceSpec<FetchResult> = {
   key: 'usgs',
   label: 'seismic · usgs',
   layer: 'seismic',
+  // Revisions are what matter here, not new events: USGS re-solves a magnitude
+  // over the following hours, and each re-solve carries a new `updated` — which
+  // becomes a new transaction on the system axis and a genuine revision in the
+  // store. This is the feed that makes the scrubber's Y axis mean something.
+  pollSeconds: 120,
   attributes: [
     { name: 'position', sensitivity: Sensitivity.Public },
     { name: 'magnitude', sensitivity: Sensitivity.Public },

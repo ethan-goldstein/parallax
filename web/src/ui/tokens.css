@@ -69,6 +69,14 @@
   --s-12: 3rem;
 
   --radius: 2px; /* nearly square — instrument panel, not consumer app */
+
+  /* Motion. Two durations and one curve, applied only where a change of state
+     would otherwise be a jump cut: a tab body arriving, a control taking focus.
+     Nothing here animates data. A point that eased into position would be
+     asserting a movement the store never recorded. */
+  --dur-fast: 90ms;
+  --dur: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 *,

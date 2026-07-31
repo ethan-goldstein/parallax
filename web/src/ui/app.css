@@ -162,94 +162,25 @@
   color: var(--accent);
 }
 
-/* ── narrow screens ──────────────────────────────────────────────────────── */
-
-@media (max-width: 720px) {
-  .readout {
-    top: auto;
-    bottom: 210px;
-    right: var(--s-4);
-    left: var(--s-4);
-    width: auto;
-  }
-
-  .scrubber-host {
-    height: 118px;
-  }
-
-  .brand-sub {
-    display: none;
-  }
-}
-
 /* ── layer panel ─────────────────────────────────────────────────────────── */
-
-
-
-.layer-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
-  border-bottom: 1px solid var(--rule);
-  cursor: pointer;
-}
-
-.layer-row:last-child {
-  border-bottom: none;
-}
-
-/* A feed that is down stays listed and says so. Hiding it would make a partial
-   picture look like a complete one — the failure mode this project exists to
-   argue against. */
-.layer-row.dead {
-  cursor: default;
-  opacity: 0.65;
-}
-
-.layer-row input {
-  accent-color: var(--accent);
-  margin: 0;
-}
-
-.layer-row .v {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-small);
-}
 
 .obligation {
   color: var(--ink-faint);
 }
 
-@media (max-width: 720px) {
-  .layers {
-    top: auto;
-    bottom: 210px;
-    left: var(--s-4);
-    width: 10rem;
-  }
-}
-
 /* ── query bar ───────────────────────────────────────────────────────────── */
 
+/* The query used to float in a fixed bar across the top of the map, which is
+   where a viewer expects a SEARCH box — so they typed a place name into a
+   console for a typed query language and got a parse error for their trouble.
+   It lives in a tab now, next to the plan it produces. */
 .query-bar {
-  position: fixed;
-  top: 84px;
-  left: 50%;
-  transform: translateX(-50%);
-  /* Derived from the rails rather than a hardcoded guess. The old `30rem`
-     predates the rails and was 5rem narrower than they actually occupy, so at
-     1280px the bar ran 56px underneath the right rail. */
-  width: min(46rem, calc(100vw - var(--rail-left-w) - var(--rail-right-w) - 8rem));
-  z-index: 3;
-  pointer-events: auto;
+  padding: var(--s-3);
 }
 
 .query-input {
   width: 100%;
-  padding: var(--s-3) var(--s-4);
+  padding: var(--s-2) var(--s-3);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   color: var(--ink);
@@ -436,14 +367,10 @@
   color: var(--deny);
 }
 
-@media (max-width: 1100px) {
-  .query-bar {
-    width: calc(100vw - 4rem);
-  }
-  .explain {
-    display: none;
-  }
-}
+/* EXPLAIN used to be `display: none` under 1100px. It is the panel that shows
+   the planner choosing an access path and being wrong about the row count — the
+   single best evidence that there is a real query engine here — and it was
+   invisible on any laptop. It lives in the query tab now, at every width. */
 
 /* ── merge evidence ──────────────────────────────────────────────────────── */
 
@@ -594,14 +521,9 @@
   color: var(--valid-time);
 }
 
-/* Hidden only when it would genuinely overlap the layer panel. The earlier
-   1400px breakpoint hid it on ordinary laptop widths, so the flagship panel of
-   this phase was invisible on most screens. */
-@media (max-width: 1180px) {
-  .evidence {
-    display: none;
-  }
-}
+/* No longer hidden at any width — it is in the engine tab, which has room for
+   it. The previous breakpoints hid the flagship panel of its own phase on every
+   ordinary laptop. */
 
 /* ── purpose selector ────────────────────────────────────────────────────── */
 
@@ -752,21 +674,10 @@
   color: var(--deny);
 }
 
-/* The readout sits below the audit panel when both are present. */
-.readout {
-  top: auto;
-  bottom: 190px;
-}
-
-@media (max-width: 1180px) {
-  .audit {
-    display: none;
-  }
-  .readout {
-    top: 84px;
-    bottom: auto;
-  }
-}
+/* The audit panel used to be `display: none` under 1180px, and the readout was
+   hand-positioned around it. Both are gone: the audit log lives in the engine
+   tab and is reachable at every width, and rail panels have not positioned
+   themselves since the rails were introduced. */
 
 /* ── benchmark panel ─────────────────────────────────────────────────────── */
 
@@ -865,11 +776,6 @@
   color: var(--deny);
 }
 
-@media (max-width: 1180px) {
-  .bench {
-    display: none;
-  }
-}
 
 /* The honest-result note. Bone rather than faint: it is the most important
    thing in the panel, not a caveat to be skimmed past. */
@@ -886,59 +792,214 @@
   margin-top: var(--s-3);
 }
 
-.layer-group-title {
-  padding: var(--s-2) var(--s-3) var(--s-1);
-  opacity: 0.55;
-  letter-spacing: 0.08em;
-  border-bottom: 1px solid var(--rule);
-}
+/* ── tab rail, dock and the right rail ───────────────────────────────────────
+   Three iterations of the same problem. Panels were once individually
+   `position: fixed` with hand-picked offsets, which collided at eight panels.
+   Two scrolling rails fixed the collisions and replaced them with a scroll
+   marathon: the layer list ran below the fold, so a viewer concluded the map had
+   no maritime or aviation data, and four analysis panels were `display: none`
+   under 1180px rather than being given anywhere to go.
 
-/* Rows spanning a coverage note need a fourth grid line. */
-.layer-row {
-  grid-template-columns: auto 1fr auto;
-  grid-auto-rows: min-content;
-}
+   Now: a permanent icon rail, and one dock showing one panel at a time. The map
+   is the document. A panel is something you opened.
 
-.layer-note {
-  grid-column: 1 / -1;
-  font-size: 0.72rem;
-  opacity: 0.5;
-  padding-left: var(--s-4);
-}
-
-/* A source feeding a layer another source already owns the checkbox for. It is
-   listed because two agencies feeding one layer is the setup for the entity
-   resolution panel — but it gets a marker, not a second control that would
-   desync from the first. */
-.layer-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.45;
-  justify-self: center;
-}
-
-
-/* ── rails ───────────────────────────────────────────────────────────────────
-   Panels used to be individually `position: fixed` with hand-picked top/bottom
-   offsets. That works for three panels and collides for eight: the layer list
-   was being covered by the benchmark button, the evidence panel ran straight
-   through the scrubber, and four data sources were unreachable because the
-   panel they lived in had no height to scroll in.
-
-   Two rails now own placement. Panels inside them are in normal flow, so they
-   stack instead of overlapping, and each rail scrolls independently when its
-   contents outgrow the viewport.
+   INVARIANT: nothing in the tab system may touch --rail-bottom. The dock is
+   fixed and overlays the map, so the scrubber's box is identical whichever tab
+   is open — which is what makes it safe never to call Scrubber.resize() on a
+   tab change. Break that and the canvas silently draws at the wrong scale.
    ────────────────────────────────────────────────────────────────────────── */
 
 :root {
   --rail-top: 84px;
   /* scrubber (140) + attribution + padding */
   --rail-bottom: 196px;
-  --rail-left-w: 15.5rem;
-  --rail-right-w: 19rem;
+  --tabrail-w: 3.25rem;
+  --dock-w: 19rem;
+  --rail-right-w: 16rem;
 }
+
+.tabrail {
+  position: fixed;
+  top: var(--rail-top);
+  bottom: var(--rail-bottom);
+  left: var(--s-4);
+  z-index: 4;
+  width: var(--tabrail-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(115%);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.tabrail-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.tabrail-rule {
+  height: 1px;
+  margin: var(--s-1) var(--s-3);
+  background: var(--rule);
+}
+
+.tabrail button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.tabrail button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tabrail button:hover { color: var(--ink-dim); }
+
+.tabrail button.on {
+  color: var(--tab-accent, var(--accent));
+}
+
+/* The active marker is a hairline against the rail edge, not a filled pill —
+   the same vocabulary as every other selected state here. */
+.tabrail button.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  background: currentColor;
+}
+
+/* The name rides out of the rail on hover rather than living in it: at
+   3.25rem there is no room for a label, and a rail of unexplained glyphs is
+   its own kind of unreadable. */
+.tabrail .tab-name {
+  position: absolute;
+  left: calc(100% + var(--s-2));
+  padding: var(--s-1) var(--s-2);
+  white-space: nowrap;
+  color: var(--ink);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.tabrail button:hover .tab-name,
+.tabrail button:focus-visible .tab-name { opacity: 1; }
+
+.dock {
+  position: fixed;
+  top: var(--rail-top);
+  bottom: var(--rail-bottom);
+  left: calc(var(--s-4) + var(--tabrail-w) + var(--s-2));
+  z-index: 3;
+  width: var(--dock-w);
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(115%);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.dock[hidden] { display: none; }
+
+.dock-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.dock-title { color: var(--tab-accent, var(--accent)); }
+
+.dock-close {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.dock-close:hover { color: var(--ink); }
+
+.dock-close svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+/* One scroll region for the dock, never one per panel inside it. Nested
+   scrollers were how EXPLAIN ended up with its own 34vh cap inside a column
+   that also scrolled. */
+.dock-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+
+.dock-body::-webkit-scrollbar { width: 6px; }
+.dock-body::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+
+.pane[hidden] { display: none; }
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  animation: pane-in var(--dur) var(--ease);
+}
+
+@keyframes pane-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Panels inside the dock are already framed by it. */
+.pane > .panel {
+  position: static;
+  width: 100%;
+  max-height: none;
+  background: none;
+  backdrop-filter: none;
+  border: none;
+  border-radius: 0;
+}
+
+.pane > .panel + .panel { border-top: 1px solid var(--rule); }
 
 .rail {
   position: fixed;
@@ -950,7 +1011,7 @@
   gap: var(--s-3);
   overflow-y: auto;
   overflow-x: hidden;
-  pointer-events: auto;
+  pointer-events: none;
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
 }
@@ -958,39 +1019,32 @@
 .rail::-webkit-scrollbar { width: 6px; }
 .rail::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
 
-.rail-left {
-  left: var(--s-6);
-  width: var(--rail-left-w);
-}
-
 .rail-right {
   right: var(--s-6);
   width: var(--rail-right-w);
 }
 
-/* Panels no longer position themselves. */
+/* Panels no longer position themselves. Pointer events are re-enabled per
+   panel so the empty space in the rail does not eat map drags. */
 .rail > .panel {
   position: static;
   flex: 0 0 auto;
   width: 100%;
   max-height: none;
+  pointer-events: auto;
 }
 
-/* An empty analysis panel takes no space rather than leaving a gap. */
-.rail > .panel:empty { display: none; }
+/* An empty analysis panel takes no space rather than leaving a gap.
+   Deliberately NOT `.rail > .panel:empty`: the direct-child form breaks the
+   moment a panel is nested inside a tab body, and it fails silently — the panel
+   reappears as an unexplained gap rather than as an error. */
+.panel:empty { display: none; }
 
 .panel-title {
   padding: var(--s-2) var(--s-3);
   border-bottom: 1px solid var(--rule);
   opacity: 0.6;
   letter-spacing: 0.08em;
-}
-
-/* EXPLAIN and the audit log can be long; cap them so one panel cannot push
-   everything else out of reach. */
-#explain, #audit, #evidence {
-  max-height: 34vh;
-  overflow-y: auto;
 }
 
 .obligations .obligation {
@@ -1056,14 +1110,37 @@
 
 .layer-head {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-3) var(--s-1);
+  padding: var(--s-2) var(--s-3);
   cursor: pointer;
+  list-style: none;
 }
 
+/* The default disclosure triangle sits before the checkbox and reads as a
+   second control. Replaced by the chevron at the end of the row. */
+.layer-head::-webkit-details-marker { display: none; }
+.layer-head::marker { content: ''; }
+
+.layer-head:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
+
 .layer-head input { accent-color: var(--accent); margin: 0; }
+
+.layer-chev {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.layer-block[open] .layer-chev { transform: rotate(90deg); }
+
+.layer-detail { padding-bottom: var(--s-1); }
 
 .layer-head .v {
   font-family: var(--font-mono);
@@ -1124,24 +1201,165 @@
   color: var(--ink-faint);
 }
 
+/* ── narrow screens ──────────────────────────────────────────────────────────
+   Three breakpoints, each doing exactly one thing. There were five, two of them
+   dead and the rest contradictory: `display: none` on .evidence at 1180, on
+   .audit at 1180, on .explain at 1100, so a 1366 laptop showed the flagship
+   panels and a 1170 one silently did not.
+
+   Nothing here hides a panel. Everything the wide layout can reach, these can
+   reach — a panel that vanishes without saying so is the exact failure mode this
+   project argues against in its data.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Compact: the dock stops sitting beside the map and starts covering it. */
 @media (max-width: 1100px) {
-  :root { --rail-left-w: 13rem; --rail-right-w: 15rem; }
-  /* Same derivation, narrower rails — no second hardcoded number to drift. */
-  .query-bar { width: min(30rem, calc(100vw - var(--rail-left-w) - var(--rail-right-w) - 5rem)); }
+  :root {
+    --dock-w: min(21rem, 88vw);
+    --rail-right-w: 13.5rem;
+  }
+
+  /* Above the tab rail rather than beside it, so the dock has the full height. */
+  .dock { z-index: 5; }
+
+  .brand-sub { display: none; }
 }
 
-@media (max-width: 820px) {
-  .rail { position: static; width: auto; }
-}
+/* Handheld: the rail turns horizontal and sits on the scrubber's shoulder, and
+   the readout gives up its column for a wrapping strip under the header. */
+@media (max-width: 700px) {
+  :root {
+    --tabrail-w: auto;
+    --dock-w: calc(100vw - 2 * var(--s-2));
+    --rail-bottom: 172px;
+    /* The readout strip's height, referenced by both the strip and the dock's
+       top edge so the two cannot drift into overlapping. */
+    --strip-h: 2.75rem;
+  }
 
+  .tabrail {
+    top: auto;
+    bottom: var(--rail-bottom);
+    left: var(--s-2);
+    right: var(--s-2);
+    width: auto;
+    flex-direction: row;
+    justify-content: center;
+    gap: var(--s-1);
+    padding: var(--s-1) var(--s-2);
+  }
+
+  .tabrail-group { flex-direction: row; }
+
+  .tabrail-rule {
+    width: 1px;
+    height: auto;
+    margin: var(--s-2) var(--s-1);
+  }
+
+  .tabrail button { width: 2.25rem; }
+
+  /* There is no room to the side for the hover label, and no hover to trigger
+     it — the dock header names the panel instead. */
+  .tabrail .tab-name { display: none; }
+
+  .tabrail button.on::before {
+    left: 20%;
+    right: 20%;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 2px;
+  }
+
+  .dock {
+    left: var(--s-2);
+    right: var(--s-2);
+    bottom: calc(var(--rail-bottom) + 2.75rem);
+    width: auto;
+  }
+
+  /* The readout stops being a column and becomes one scrolling strip under the
+     header, so the dock can own the rest of the screen without covering it.
+     Its height is fixed and known, which is what lets the dock start below it
+     rather than guessing. */
+  .rail-right {
+    left: var(--s-2);
+    right: var(--s-2);
+    top: 56px;
+    bottom: auto;
+    width: auto;
+    height: var(--strip-h);
+    flex-direction: row;
+    gap: var(--s-2);
+    overflow: visible;
+  }
+
+  .rail-right > .readout {
+    flex: 1 1 auto;
+    display: flex;
+    height: var(--strip-h);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .rail-right > .readout::-webkit-scrollbar { display: none; }
+
+  .readout .row {
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+    padding: var(--s-1) var(--s-3);
+    border-bottom: none;
+    border-right: 1px solid var(--rule);
+  }
+
+  .readout .row:last-child { border-right: none; }
+
+  .dock { top: calc(56px + var(--strip-h) + var(--s-2)); }
+
+  /* The inspector answers a tap on the map, so at this width it comes in over
+     the tab strip rather than queueing behind the readout in a row that has no
+     room for it. */
+  .rail-right > .inspector {
+    position: fixed;
+    left: var(--s-2);
+    right: var(--s-2);
+    bottom: calc(var(--rail-bottom) + 2.75rem);
+    z-index: 6;
+    max-height: 40vh;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    backdrop-filter: blur(14px) saturate(115%);
+    border: 1px solid var(--rule);
+  }
+
+  /* The tab strip now occupies the band the controls used to sit in, and
+     MapLibre's attribution sits directly below them. Lift the controls clear of
+     both: attribution is a licence obligation, so "mostly readable" is not a
+     state it is allowed to be in. */
+  .map-controls {
+    bottom: calc(var(--rail-bottom) + 2.75rem + 2.5rem);
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 2 * var(--s-2));
+  }
+
+  .scrubber-host { height: 118px; }
+}
 
 /* ── MapLibre's own controls ─────────────────────────────────────────────────
    They anchor to the canvas, which is the full viewport, so by default they sit
    underneath the scrubber footer. Lift them to just above it. Attribution is a
    licence obligation and must stay legible, not merely present. */
 
-/* Inset past the rails as well as up past the footer — the canvas is the whole
-   viewport, so "bottom right" is underneath two panels by default. */
+/* Inset past the chrome as well as up past the footer — the canvas is the whole
+   viewport, so "bottom right" is underneath two panels by default. Derived from
+   the same custom properties the chrome is laid out with, so a width change
+   moves these with it rather than leaving a second number to drift. */
 .maplibregl-ctrl-bottom-right {
   bottom: calc(var(--rail-bottom) + var(--s-2));
   right: calc(var(--rail-right-w) + var(--s-6) + var(--s-3));
@@ -1150,8 +1368,26 @@
 
 .maplibregl-ctrl-bottom-left {
   bottom: calc(var(--rail-bottom) + var(--s-2));
-  left: calc(var(--rail-left-w) + var(--s-6) + var(--s-3));
+  left: calc(var(--s-4) + var(--tabrail-w) + var(--s-2) + var(--dock-w) + var(--s-3));
   z-index: 3;
+}
+
+/* With the dock closed there is nothing to clear but the rail. */
+.dock[hidden] ~ .stage .maplibregl-ctrl-bottom-left,
+body:has(.dock[hidden]) .maplibregl-ctrl-bottom-left {
+  left: calc(var(--s-4) + var(--tabrail-w) + var(--s-3));
+}
+
+@media (max-width: 700px) {
+  .maplibregl-ctrl-bottom-left,
+  body:has(.dock[hidden]) .maplibregl-ctrl-bottom-left {
+    left: var(--s-2);
+    bottom: calc(var(--rail-bottom) + 2.75rem);
+  }
+  .maplibregl-ctrl-bottom-right {
+    right: var(--s-2);
+    bottom: calc(var(--rail-bottom) + 2.75rem);
+  }
 }
 
 .maplibregl-ctrl-attrib {
@@ -1290,3 +1526,429 @@
   color: var(--ink-dim);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── query builder ───────────────────────────────────────────────────────────
+   Controls that write the query language in front of you. The compiled output
+   is the feature, not a debug affordance, so it gets the weight of a result
+   rather than the weight of a hint.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.qb-sec {
+  padding: var(--s-3) var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--rule);
+}
+
+.qb-legend {
+  display: block;
+  margin-bottom: var(--s-2);
+  opacity: 0.7;
+}
+
+/* Segmented pickers — the same vocabulary as the basemap and projection
+   controls, so a viewer only learns one kind of switch. */
+.qb-seg {
+  display: flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.qb-seg button {
+  flex: 1 1 auto;
+  padding: var(--s-1) var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  border-right: 1px solid var(--rule);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.qb-seg button:last-child { border-right: none; }
+.qb-seg button:hover { color: var(--ink); }
+
+.qb-seg button.on {
+  color: var(--bg);
+  background: var(--tab-accent, var(--accent));
+}
+
+.qb-filter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s-1);
+  margin-bottom: var(--s-2);
+}
+
+.qb-filter .qb-val {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.qb-val input[type='range'] { flex: 1 1 auto; min-width: 0; }
+.qb-val input[type='text'] { flex: 1 1 auto; min-width: 0; }
+.qb-val-out { flex: 0 0 auto; font-size: var(--fs-micro); color: var(--ink); }
+
+.qb select,
+.qb input[type='text'],
+.qb input[type='number'] {
+  min-width: 0;
+  padding: 2px var(--s-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.qb select:focus,
+.qb input:focus { border-color: var(--accent); }
+
+.qb input[type='range'] { accent-color: var(--tab-accent, var(--accent)); }
+
+.qb-del {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.qb-del:hover { color: var(--deny); border-color: var(--deny); }
+
+.qb-add {
+  width: 100%;
+  padding: var(--s-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.qb-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent-dim); }
+.qb-add:disabled { opacity: 0.4; cursor: default; }
+
+.qb-empty {
+  margin-bottom: var(--s-2);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+.qb-near { margin-top: var(--s-2); }
+
+.qb-coords {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+
+.qb-coords label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.qb-coords input { width: 4.5rem; }
+
+.qb-pick {
+  padding: 2px var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qb-pick:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+/* Armed: the next map click lands here instead of in the inspector. */
+.qb-pick.armed {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.qb-range {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.qb-range input { flex: 1 1 auto; min-width: 0; }
+
+.qb-hint {
+  margin-top: var(--s-1);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+.qb-sort {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.qb-sort select { flex: 1 1 auto; }
+
+.qb-dir {
+  padding: 2px var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.qb-dir:disabled { opacity: 0.4; cursor: default; }
+.qb-limit-wrap { display: flex; align-items: center; gap: var(--s-1); }
+.qb-limit-wrap input { width: 3.5rem; }
+
+/* ── the compiled query ──────────────────────────────────────────────────── */
+
+/* Sticky, because it is the thing you are meant to be watching. The controls
+   are taller than the dock, so without this both the compiled query and the RUN
+   button sat below the fold — a builder whose output you have to scroll to find
+   is not demonstrating anything. */
+.qb-out {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--s-3);
+  background: color-mix(in srgb, var(--panel-raised) 96%, transparent);
+  backdrop-filter: blur(14px) saturate(115%);
+  border-top: 1px solid var(--rule);
+}
+
+.qb-code {
+  display: block;
+  padding: var(--s-2) var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  word-break: break-word;
+}
+
+.tk-source { color: var(--accent); }
+.tk-keyword { color: var(--ink-dim); }
+.tk-field { color: var(--ink); }
+.tk-op { color: var(--ink-faint); }
+.tk-literal { color: var(--valid-time); }
+
+/* Where the scrubber has the two axes. Read-only on purpose: giving the builder
+   its own time controls would put one setting in two places. */
+.qb-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-1) var(--s-2);
+  margin-top: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+.qb-valid { color: var(--valid-time); }
+.qb-sys { color: var(--system-time); }
+.qb-from { color: var(--ink-faint); }
+
+.qb-actions {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.qb-run,
+.qb-edit {
+  flex: 1 1 auto;
+  padding: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-hud);
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.qb-run {
+  color: var(--bg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.qb-edit {
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--rule);
+}
+
+.qb-edit:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+/* The raw console, kept as an escape hatch rather than the front door. */
+.qb-console {
+  border-top: 1px solid var(--rule);
+}
+
+.qb-console > summary {
+  padding: var(--s-2) var(--s-3);
+  color: var(--ink-faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+.qb-console > summary::-webkit-details-marker { display: none; }
+.qb-console > summary::marker { content: ''; }
+.qb-console > summary:hover { color: var(--ink-dim); }
+.qb-console[open] > summary { color: var(--ink-dim); }
+
+/* Refresh cadence, per source. A viewer who cannot tell a live feed from a
+   frozen one has no reason to believe either — and until polling existed, every
+   feed was frozen. */
+.layer-rate {
+  grid-column: 1 / -1;
+  color: var(--valid-time);
+  opacity: 0.7;
+}
+
+/* A layer with data that is simply not valid *now*. Teal, because that is the
+   valid-time colour and the axis it is telling you to drag is the teal one. */
+.layer-elsewhere {
+  color: var(--valid-time);
+  opacity: 0.75;
+}
+
+/* ── recon ───────────────────────────────────────────────────────────────────
+   Shares the query builder's control vocabulary — a segmented picker, one input,
+   an answer — because a viewer should only have to learn one kind of panel.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.rc-hint {
+  margin: var(--s-2) 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  line-height: 1.45;
+}
+
+.rc-input {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.rc-q {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--s-1) var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink);
+  background: var(--panel-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.rc-q:focus { border-color: var(--accent); }
+
+.rc-go {
+  flex: 0 0 auto;
+  padding: var(--s-1) var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-hud);
+  color: var(--bg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.rc-go:disabled { opacity: 0.5; cursor: default; }
+
+.rc-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: var(--s-2);
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  word-break: break-word;
+}
+
+.rc-row.warn > span:last-child { color: var(--deny); }
+
+.rc-error {
+  padding: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--deny);
+  border: 1px solid color-mix(in srgb, var(--deny) 40%, transparent);
+  border-radius: var(--radius);
+}
+
+/* Teal: this is a valid-time statement, and teal is the valid-time colour. */
+.rc-valid {
+  margin-top: var(--s-2);
+  font-size: var(--fs-micro);
+  color: var(--valid-time);
+  opacity: 0.85;
+}
+
+.rc-note {
+  margin-top: var(--s-2);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  line-height: 1.45;
+}
+
+.rc-locate {
+  margin-top: var(--s-2);
+  padding: 2px var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.rc-locate:hover { color: var(--accent); border-color: var(--accent-dim); }
+
+.rc-hist {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-2);
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+}
+
+.rc-hist-n { color: var(--system-time); }
+
+.rc-refuses { border-bottom: none; }
+.rc-refuses strong { color: var(--ink-dim); font-weight: 400; }

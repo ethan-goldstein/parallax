@@ -8,13 +8,18 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:assets": "node scripts/build-nws-zones.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.7"
   },
   "dependencies": {
-    "maplibre-gl": "^6.1.0"
+    "maplibre-gl": "^6.1.0",
+    "satellite.js": "^7.1.0"
   }
 }

@@ -31,6 +31,18 @@ export interface ScrubberOptions {
   container: HTMLElement
   validMin: number
   validMax: number
+  /**
+   * Where the valid axis starts, defaulting to its maximum.
+   *
+   * That default stopped being right once a source with a BOUNDED validity
+   * window arrived. `validMax` is the furthest-future instant any fact claims,
+   * and the aurora forecast claims about eighty minutes ahead — so the axis
+   * opened in the future, where a satellite valid for ±150 seconds around now
+   * does not exist, and both layers rendered zero points on a working feed.
+   *
+   * "Now" is also just the better answer to what a viewer wants first.
+   */
+  validAt?: number
   transactions: Transaction[]
   onChange: (state: ScrubberState) => void
 }
@@ -40,6 +52,41 @@ const PAD_R = 16
 const PAD_T = 14
 const PAD_B = 30
 
+/**
+ * The palette, read from the stylesheet rather than repeated here.
+ *
+ * A canvas cannot use a CSS custom property, so these used to be six hex
+ * literals in the draw call — a second copy of the two colours that carry the
+ * most meaning in the entire interface. `--valid-time` and `--system-time` are
+ * load-bearing: teal means "when it was true" and violet means "when we believed
+ * it" everywhere, and a scrubber drawing its own slightly different teal would
+ * break the one association the whole design depends on.
+ *
+ * Read once at construction. These are design tokens, not a live theme.
+ */
+interface Palette {
+  valid: string
+  system: string
+  rule: string
+  dim: string
+  accent: string
+  bg: string
+}
+
+function readPalette(): Palette {
+  const s = getComputedStyle(document.documentElement)
+  const token = (name: string, fallback: string): string =>
+    s.getPropertyValue(name).trim() || fallback
+  return {
+    valid: token('--valid-time', '#3fd0c9'),
+    system: token('--system-time', '#a78bfa'),
+    rule: token('--rule', '#2a2a30'),
+    dim: token('--ink-dim', '#8a8a93'),
+    accent: token('--accent', '#ffb000'),
+    bg: token('--bg', '#0b0b0d'),
+  }
+}
+
 export class Scrubber {
   #canvas: HTMLCanvasElement
   #ctx: CanvasRenderingContext2D
@@ -47,6 +94,22 @@ export class Scrubber {
   #state: ScrubberState
   #dragging = false
   #lockAxis: 'x' | 'y' | null = null
+  #palette = readPalette()
+
+  /**
+   * Whether the valid axis is still following the present.
+   *
+   * Set false the first time a human moves it, and never set back — the same
+   * `tail -f` question as the system axis, against a different clock.
+   *
+   * Without this the axis froze at the instant of page load while "now" kept
+   * moving, so every layer whose facts are only valid around the present drained
+   * away: aircraft positions arriving from a poll fifty seconds later were, from
+   * the axis's point of view, in the future. Military traffic rendered 198
+   * points at boot and 0 a minute afterwards, on a feed that was working
+   * perfectly the whole time.
+   */
+  #followNow = true
 
   constructor(opts: ScrubberOptions) {
     this.#opts = opts
@@ -65,7 +128,10 @@ export class Scrubber {
     if (!ctx) throw new Error('2D canvas context unavailable')
     this.#ctx = ctx
 
-    this.#state = { validAt: opts.validMax, sysAt: Math.max(0, opts.transactions.length - 1) }
+    this.#state = {
+      validAt: Math.min(Math.max(opts.validAt ?? opts.validMax, opts.validMin), opts.validMax),
+      sysAt: Math.max(0, opts.transactions.length - 1),
+    }
 
     this.#canvas.addEventListener('pointerdown', this.#onDown)
     this.#canvas.addEventListener('pointermove', this.#onMove)
@@ -81,12 +147,67 @@ export class Scrubber {
     return { ...this.#state }
   }
 
-  setTransactions(txns: Transaction[], validMin: number, validMax: number): void {
+  /**
+   * Extends both axes after new data arrives.
+   *
+   * `follow` is the `tail -f` question. Someone sitting on the newest
+   * transaction is watching the present and wants to keep watching it; someone
+   * parked at transaction 400 is examining what was believed then, and jumping
+   * them to the newest would destroy exactly the thing they were looking at.
+   * So the position is only advanced if it was already at the end.
+   */
+  setTransactions(
+    txns: Transaction[],
+    validMin: number,
+    validMax: number,
+    follow = false,
+    /** Present instant, as a px::Timestamp. */
+    nowValid?: number,
+  ): void {
+    const wasAtEnd = this.#state.sysAt >= this.#opts.transactions.length - 1
+
     this.#opts.transactions = txns
     this.#opts.validMin = validMin
     this.#opts.validMax = validMax
-    this.#state.sysAt = Math.max(0, txns.length - 1)
-    this.#state.validAt = validMax
+
+    if (!follow || wasAtEnd) this.#state.sysAt = Math.max(0, txns.length - 1)
+    else this.#state.sysAt = Math.min(this.#state.sysAt, Math.max(0, txns.length - 1))
+
+    if (!follow) {
+      this.#state.validAt = nowValid ?? validMax
+      this.#followNow = true
+    } else if (this.#followNow && nowValid !== undefined) {
+      // Still watching the present, so the present is where it stays.
+      this.#state.validAt = nowValid
+    }
+    this.#state.validAt = Math.min(Math.max(this.#state.validAt, validMin), validMax)
+
+    this.draw()
+  }
+
+  /** True while the valid axis is still tracking the present. */
+  get followingNow(): boolean {
+    return this.#followNow
+  }
+
+  get validMin(): number {
+    return this.#opts.validMin
+  }
+
+  get validMax(): number {
+    return this.#opts.validMax
+  }
+
+  /**
+   * Moves the valid axis without ending follow mode.
+   *
+   * Distinct from a drag on purpose: this is the clock advancing, not a person
+   * choosing an instant, and only the latter should stop the axis tracking now.
+   */
+  setValidAt(t: number): void {
+    const next = Math.min(Math.max(t, this.#opts.validMin), this.#opts.validMax)
+    if (next === this.#state.validAt) return
+    this.#state.validAt = next
     this.draw()
   }
 
@@ -166,7 +287,10 @@ export class Scrubber {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    if (this.#lockAxis !== 'y') this.#state.validAt = this.#xToValid(x)
+    if (this.#lockAxis !== 'y') {
+      this.#state.validAt = this.#xToValid(x)
+      this.#followNow = false
+    }
     if (this.#lockAxis !== 'x') this.#state.sysAt = this.#yToSys(y)
 
     this.draw()
@@ -181,9 +305,11 @@ export class Scrubber {
     switch (e.key) {
       case 'ArrowLeft':
         this.#state.validAt = Math.max(this.#opts.validMin, this.#state.validAt - step)
+        this.#followNow = false
         break
       case 'ArrowRight':
         this.#state.validAt = Math.min(this.#opts.validMax, this.#state.validAt + step)
+        this.#followNow = false
         break
       case 'ArrowUp':
         this.#state.sysAt = Math.min(this.#opts.transactions.length - 1, this.#state.sysAt + 1)
@@ -193,9 +319,11 @@ export class Scrubber {
         break
       case 'Home':
         this.#state.validAt = this.#opts.validMin
+        this.#followNow = false
         break
       case 'End':
         this.#state.validAt = this.#opts.validMax
+        this.#followNow = false
         break
       default:
         handled = false
@@ -227,10 +355,7 @@ export class Scrubber {
 
     ctx.clearRect(0, 0, p.w, p.h)
 
-    const VALID = '#3fd0c9'
-    const SYSTEM = '#a78bfa'
-    const RULE = '#2a2a30'
-    const DIM = '#8a8a93'
+    const { valid: VALID, system: SYSTEM, rule: RULE, dim: DIM } = this.#palette
 
     // Plot frame — hairlines only.
     ctx.strokeStyle = RULE
@@ -290,11 +415,11 @@ export class Scrubber {
     ctx.globalAlpha = 1
 
     // Puck.
-    ctx.fillStyle = '#ffb000'
+    ctx.fillStyle = this.#palette.accent
     ctx.beginPath()
     ctx.arc(cx, cy, 4.5, 0, Math.PI * 2)
     ctx.fill()
-    ctx.strokeStyle = '#0b0b0d'
+    ctx.strokeStyle = this.#palette.bg
     ctx.lineWidth = 1.5
     ctx.stroke()
 

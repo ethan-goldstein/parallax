@@ -125,8 +125,8 @@ function revisions(hit: InspectHit): Map<string, InspectFact[]> {
 
 export function renderInspector(host: HTMLElement, data: InspectResult | null): void {
   if (!data || !data.hit) {
-    // Empty rather than a placeholder: `.rail > .panel:empty` collapses it, so
-    // the rail does not carry a permanently blank box.
+    // Empty rather than a placeholder: `.panel:empty` collapses it, so the rail
+    // does not carry a permanently blank box.
     host.innerHTML = ''
     return
   }

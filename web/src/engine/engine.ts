@@ -90,6 +90,13 @@ interface EngineExports {
   txnFactCount(i: number): number
   registerSource(name: string, geoAttr: number, scalarAttr: number): void
   runQuery(sql: string, nowUnix: number): QueryResult
+  runQueryAt(
+    sql: string,
+    nowUnix: number,
+    validAt: number,
+    sysAt: number,
+    record: boolean,
+  ): QueryResult
   setPurpose(name: string): boolean
   setSensitivity(attr: number, level: number): void
   auditLog(limit: number): string
@@ -212,6 +219,29 @@ export class Engine {
    */
   runQuery(sql: string, nowUnix = Math.floor(Date.now() / 1000)): QueryResult {
     return this.#x.runQuery(sql, nowUnix)
+  }
+
+  /**
+   * The same query, pinned to the scrubber's two axes.
+   *
+   * `sysAt` is a transaction INDEX, passed straight through. Expressing the same
+   * thing by appending `as of … @ …` to the SQL would be lossy: that clause
+   * takes a wall clock, and several transactions routinely share one second —
+   * every live feed lands in the same minute bucket — so the engine would
+   * resolve back to the last of them rather than the one selected.
+   *
+   * `record: false` suppresses only the audit write, never the policy check. A
+   * scrubber drag is one question being explored at sixty instants a second; a
+   * trail with sixty identical entries answers nothing.
+   */
+  runQueryAt(
+    sql: string,
+    validAt: number,
+    sysAt: number,
+    record = true,
+    nowUnix = Math.floor(Date.now() / 1000),
+  ): QueryResult {
+    return this.#x.runQueryAt(sql, nowUnix, validAt, sysAt, record)
   }
 
   /**

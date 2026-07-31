@@ -32,6 +32,7 @@ import type { StyleSpecification } from 'maplibre-gl'
 // fails to load and the worker closes the instant it starts. See setWorkerUrl.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
+import type { Viewport } from '../sources/spec'
 import type { LayerSpec } from './pointsLayer'
 import { PointProgramCache, PointsLayer } from './pointsLayer'
 
@@ -428,6 +429,11 @@ export class Globe {
     })
     this.#bindPicking(map)
 
+    // Registered before the style finished loading, so it is bound here rather
+    // than dropped on the floor.
+    this.#pendingViewportHandler?.(map)
+    this.#pendingViewportHandler = null
+
     // Feed failures are surfaced in the layer panel; a basemap or tile failure
     // should not be the one thing that fails silently.
     map.on('error', (e) => console.error('[parallax] map', e.error ?? e))
@@ -591,6 +597,26 @@ export class Globe {
    * that, and every extra call is a spatial query and a JSON build that nothing
    * will ever read.
    */
+  /**
+   * Fires once the camera has settled somewhere new.
+   *
+   * `moveend` rather than `move`: a pan emits hundreds of move events, and a
+   * viewport-scoped source would issue a fetch for every intermediate frame of a
+   * gesture whose destination is the only one anybody wanted.
+   */
+  onViewportSettled(handler: (view: Viewport) => void): void {
+    const bind = (map: MlMap): void => {
+      map.on('moveend', () => {
+        const v = this.viewport()
+        if (v) handler(v)
+      })
+    }
+    if (this.#map) bind(this.#map)
+    else this.#pendingViewportHandler = bind
+  }
+
+  #pendingViewportHandler: ((map: MlMap) => void) | null = null
+
   onPick(handler: (pick: PickEvent | null, kind: 'hover' | 'click') => void): void {
     this.#onPick = handler
   }
@@ -689,6 +715,47 @@ export class Globe {
   set autoRotate(v: boolean) {
     if (v) this.start()
     else this.stop()
+  }
+
+  /**
+   * Re-measures the container.
+   *
+   * MapLibre watches the container with a ResizeObserver, which does not fire
+   * while the document is hidden — so a tab opened in the background boots with
+   * the container at zero size and keeps the 400×300 default canvas after it is
+   * finally looked at. Observed directly: `document.hidden` true at boot leaves a
+   * 400×300 canvas inside a 1280×720 stage until something calls this.
+   */
+  resize(): void {
+    this.#map?.resize()
+  }
+
+  /**
+   * What is currently on screen, for sources that fetch by region.
+   *
+   * `radiusKm` is the great-circle distance from the centre to a corner, so a
+   * radius query built from it covers the visible rectangle rather than the
+   * circle inscribed in it — a source asked for the inscribed circle would leave
+   * the corners of the viewport visibly empty.
+   */
+  viewport(): Viewport | null {
+    const map = this.#map
+    if (!map) return null
+    const b = map.getBounds()
+    const c = map.getCenter()
+    const toRad = (d: number): number => (d * Math.PI) / 180
+    const dLat = toRad(b.getNorth() - c.lat)
+    const dLon = toRad(b.getEast() - c.lng) * Math.cos(toRad(c.lat))
+    return {
+      minLat: b.getSouth(),
+      minLon: b.getWest(),
+      maxLat: b.getNorth(),
+      maxLon: b.getEast(),
+      centerLat: c.lat,
+      centerLon: c.lng,
+      radiusKm: 6371 * Math.hypot(dLat, dLon),
+      zoom: map.getZoom(),
+    }
   }
 
   #spin(): void {

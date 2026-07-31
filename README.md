@@ -38,6 +38,49 @@ warning, reads just start returning `undefined`.
 **3. Cost-based query planning with honest cardinality estimates**, and a UI that shows the plan, the
 index chosen, and estimated-vs-actual rows — including where the estimate was wrong.
 
+## The interface
+
+The engine was always the point; for a while it was also the only part that was legible. The map was
+a full-bleed globe with two scrolling rails of panels over it — which meant the layer list ran below
+the fold, so a visitor could reasonably conclude the map had no maritime or aviation data at all, and
+four analysis panels were `display: none` under 1180px, so the planner's own EXPLAIN output was
+invisible on an ordinary laptop.
+
+**Navigation is an icon rail and one dock.** One panel open at a time, because the map is the document
+and a panel is something you deliberately opened. Each layer collapses to a single row — name, live
+count, checkbox — with its colour legend, its feeds, its refresh cadence and its coverage caveats
+behind a disclosure. Nothing is hidden at any width: a panel that vanishes without saying so is the
+same failure this project spends its data model arguing against.
+
+**The query bar is gone, and that is an improvement.** What sat across the top of the map, in the
+shape and position of a search field, was a console for a typed query language. A visitor's two
+options at that box were to type a place name and get a parse error, or to leave.
+
+It is now a builder: pick a layer, drag a slider, click the map to set a centre — and watch it write
+
+```
+earthquakes where magnitude > 4.5 order by magnitude desc limit 20
+```
+
+in front of you, token-coloured, with **EDIT AS TEXT** dropping that exact string into the console it
+came from. The controls are generated from each layer's declared filter fields, so the builder can
+only offer attributes the store actually has; it cannot express a query the planner would silently
+match nothing for. The compiled text is the feature, not a debug affordance — it teaches the grammar
+rather than replacing it.
+
+**The two time axes are not controls in the builder.** They belong to the scrubber, and duplicating
+them would put one setting in two places. The builder shows where they are and says where that came
+from.
+
+**RECON runs network lookups from the browser** — DNS-over-HTTPS, RDAP, RIPEstat, Shodan's InternetDB,
+MITRE CVE — with no backend, because none of them need one. Every answer is ingested as facts through
+the same path as every feed. That is not tidiness: the engine already writes its own policy decisions
+into the store as ordinary facts, so a second unaudited path for lookups would contradict the claim
+that there is one. And a DNS answer is the cleanest bitemporal object in the application, because it
+arrives with a TTL — a validity interval the *source* stated, not one this code inferred. Ask twice
+with a gap, and if the record changed the store holds both versions with the change on the system
+axis.
+
 ## Architecture
 
 ```
@@ -234,7 +277,11 @@ fetch time, and license.
 | [GDACS](https://www.gdacs.org/) | EC public sector info, attribution | disaster alerts — carries its own revision axis |
 | [NASA EONET](https://eonet.gsfc.nasa.gov/) | US public domain | wildfires, volcanoes, storms, ice |
 | [NOAA SWPC](https://www.swpc.noaa.gov/) | US public domain | OVATION aurora forecast — the only source above the diagonal |
-| [airplanes.live](https://airplanes.live/) | community terms, non-commercial | military ADS-B, global |
+| [airplanes.live](https://airplanes.live/) | community terms, non-commercial | military ADS-B global; civil ADS-B scoped to the viewport |
+| [NWS / NOAA](https://api.weather.gov/) | US public domain | US weather warnings — the richest revision axis here |
+| [CelesTrak](https://celestrak.org/) | free redistribution with attribution | orbital element sets, propagated in-browser by SGP4 |
+| PARALLAX curated | CC0, authored here | major ports, terminals and maritime chokepoints |
+| [Google Public DNS](https://dns.google/) · [rdap.org](https://rdap.org/) · [RIPEstat](https://stat.ripe.net/) · [Shodan InternetDB](https://internetdb.shodan.io/) · [MITRE CVE](https://cveawg.mitre.org/) | mixed; InternetDB non-commercial with attribution | RECON — lookups a person runs by hand |
 | [OpenFreeMap](https://openfreemap.org/) | ODbL (OpenStreetMap) | vector basemap — no key, no rate limit |
 | [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) | US public domain | LIVE basemap — today's imagery, 250 m |
 | [Sentinel-2 cloudless](https://s2maps.eu/) | CC BY-NC-SA 4.0 | SATELLITE basemap — 10 m, EOX IT Services GmbH |
@@ -257,13 +304,36 @@ are hybrids: the ground with the street network still drawn on it.
 
 Both temporal axes come from the data itself. USGS and EMSC publish `updated` / `lastupdate`
 separately from event time, and GDACS publishes `datemodified` separately from `fromdate` — those are
-the system axis. NOAA's aurora model is the inverse and the only source here that reaches the region
-*above* the scrubber's diagonal: it reports an `Observation Time` and a `Forecast Time` roughly eighty
-minutes later, so the fact is asserted before the interval it describes. AIS and ADS-B carry a single
-report time and therefore sit exactly on the diagonal; EONET publishes no revision field at all, so
-ingest time is its system axis and it does too. Where a source has no second axis, none is invented. Nothing is simulated, dripped in on a timer,
-or bucketed by event time to manufacture motion. **If a revision is not in the data, it does not go on
+the system axis.
+
+**The NWS feed states both axes outright**, and is the richest source here for it: `sent` is when the
+Weather Service issued the message, `onset`→`ends` is when the weather is expected, and `references`
+names the alert this one *supersedes*. On a typical pull, 113 of 292 active alerts are `Update`
+messages carrying such a reference — a thunderstorm warning re-issued at Severe after being issued at
+Moderate, with the causal link already drawn by the publisher. (Asking the API for
+`message_type=alert`, which looks like the obvious filter, removes every one of them.)
+
+Two sources reach the region *above* the diagonal, where a fact is asserted before the interval it
+describes. NOAA's aurora model reports an `Observation Time` and a `Forecast Time` roughly eighty
+minutes later. Satellites are the same shape for a different reason: system time is the **TLE epoch**,
+valid time is the instant SGP4 was asked about, so a propagated orbit announces itself as a prediction
+by where it lands on the axis rather than by a disclaimer next to it.
+
+AIS and ADS-B carry a single report time and therefore sit exactly on the diagonal; EONET publishes no
+revision field at all, so ingest time is its system axis and it does too. The curated port dataset has
+exactly one system time — the moment the file was authored, read from the file rather than from the
+clock — so it sits at the very bottom of the axis and stays there: scrub all the way back and the
+ports are the last thing left on the map, the fixed frame everything else has been moving against.
+
+Where a source has no second axis, none is invented. Nothing is simulated, dripped in on a timer, or
+bucketed by event time to manufacture motion. **If a revision is not in the data, it does not go on
 the axis.**
+
+The corollary is enforced on the way in. Feeds are polled now rather than fetched once, and a poll
+that returns unchanged data commits **zero transactions** — re-ingesting identical facts would mint
+system-time history carrying no information, which would turn the system axis into a record of how
+often the page polled. Re-fetching USGS after a first load drops 9,188 facts as duplicates and commits
+nothing.
 
 ## What I deliberately did not build
 
@@ -277,6 +347,15 @@ Restraint is a design requirement here, not an afterthought:
   vessel"* turns open data into targeting a natural person.
 - **No ACLED redistribution.** Its license restricts derivative works and substitutes.
 - **No TeleGeography submarine cables.** CC BY-NC-SA, and the endpoints are undocumented internals.
+- **No port scanning in RECON.** A browser cannot open arbitrary sockets, and this would decline to
+  be a scanning tool if it could. The exposure probe reads an index Shodan already published.
+- **No registrant identity from RDAP.** Names, emails, postal addresses and phone numbers are
+  discarded *in the adapter, before the store* — not filtered at query time, which would be the
+  weaker claim. `Sensitivity.PersonLinked` exists to name the category this refuses to collect, and
+  this is where the refusal actually happens.
+- **No IP geolocation.** A lookup is placed at the registered country of the announcing AS, which is
+  a fact about a registry entry. IP geolocation is wrong often enough that plotting it as a position
+  would be exactly the confident overclaim the rest of this argues against.
 
 ## What this is not
 
@@ -297,11 +376,12 @@ Restraint is a design requirement here, not an afterthought:
   name, every attribute with the agency that supplied it, both time axes, and the licence — but the
   check that fires *before* an export, when a result set mixes ODbL with a permissive source, is
   still not built.
-- **Nothing supersedes a fact.** `Store::retract` exists and no feed adapter calls it, so a
-  correction currently appends beside the old value rather than displacing it. The inspector reads
-  the full per-entity history and will show `4.8 → 5.2` the moment an adapter issues a retraction;
-  until one does, that section is empty. The machinery is real and the data is not there yet, which
-  is a different thing from the feature working.
+- **`Store::retract` is still never called.** Revisions now work, but by a different route than
+  retraction: an NWS `Update` is keyed to the identity of the alert it references, so the upgraded
+  warning writes new facts for the *same entity* at a later system time and the inspector shows both
+  versions in order. That is a genuine revision and needs no engine change. True retraction —
+  displacing a value rather than appending beside it — remains unimplemented, and `retract` is not
+  bound through embind at all.
 - **`k=5` in the policy engine is a judgement call, not a standard.** Real k-anonymity work picks k
   from the data and the threat model.
 - **Unregistered attributes default to `Public`** — fail-open, defensible only because this project

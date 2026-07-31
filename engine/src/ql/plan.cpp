@@ -99,6 +99,13 @@ Plan plan_query(const Query& q, const PlanContext& ctx, const CostModel& cost) {
     // what "as we believed at time X" means when knowledge arrives in batches.
     plan.sys_at = store.txn_at_or_before(to_unix(sys_time));
   }
+  // The caller's scrubber position wins over the query's own clause. Applied
+  // here, before any access path is costed, so estimates and actuals describe
+  // the same instant.
+  if (ctx.has_time_override) {
+    plan.valid_at = ctx.valid_at_override;
+    plan.sys_at = ctx.sys_at_override;
+  }
   if (q.since.present) {
     plan.has_since = true;
     plan.since = resolve_time(q.since, ctx.now_unix, kTimeMin);
