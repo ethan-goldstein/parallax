@@ -302,6 +302,28 @@ bidirectional-BFS stitch that returned a path containing a step that was not an 
 The query parser is **continuously fuzzed in CI**: 12.3 million executions per 60-second run under
 ASan + UBSan.
 
+## How this was built
+
+Worth stating plainly, because the commit history shows it: the first seven phases landed in one
+long session on 2026-07-30, and I built them with heavy AI assistance.
+
+What that did and did not mean. It did not mean I described a bitemporal engine and accepted what
+came back. Every load-bearing decision in here is one I made and can defend: storing `sys_from` as
+a monotone transaction id rather than a wall-clock timestamp, so system-time ordering survives a
+clock adjustment; writing the naive oracle *before* the optimised store so it could not inherit the
+optimised version's bugs; putting the policy check at plan time rather than on the output rows,
+which is only sound because two of the four cardinality estimators are exact rather than
+approximate; defaulting unregistered attributes to `Public` and then writing down, in this README,
+why that fail-open default is wrong for any system that collects person-linked data.
+
+The parts I would not claim: I did not invent bitemporal modelling, Z-order curves,
+Fellegi-Sunter, or CSR. Those are textbook, and the README cites where each came from.
+
+The reason to say so rather than let a reader guess is that the interesting question about this
+project was never who typed it. It is why the store is laid out this way, what breaks if the
+estimator is wrong, and what I chose not to build. Those answers are in
+[`docs/decisions/`](docs/decisions/), one record per phase, and I can defend any of them out loud.
+
 ---
 
 Built by **Ethan Goldstein** — B.S. Computer Information Systems, University of South Carolina '27.

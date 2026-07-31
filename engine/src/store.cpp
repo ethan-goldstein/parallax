@@ -327,8 +327,8 @@ void Store::rebuild_entity_index() {
   for (const u32 e : entity_) max_entity = std::max(max_entity, e);
 
   // Counting sort into CSR. Count, prefix-sum, scatter — O(n + entities), two
-  // passes, two allocations. Structurally the same offset-array idiom as
-  // sprayStart/sprayBase in brain3d.ts.
+  // passes, two allocations. Same offset-array idiom as the adjacency in
+  // px/graph.hpp.
   entity_offset_.assign(static_cast<usize>(max_entity) + 2, 0u);
   for (const u32 e : entity_) ++entity_offset_[static_cast<usize>(e) + 1];
   for (usize i = 1; i < entity_offset_.size(); ++i) {

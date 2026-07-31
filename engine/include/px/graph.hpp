@@ -6,11 +6,9 @@
 // counting sort — count degrees, prefix-sum, scatter — which is O(n + m) in
 // two passes and two allocations.
 //
-// This is the same jagged-offset idiom already in
-// workflow/web/src/components/brain3d.ts (sprayStart / sprayBase / sprayCap),
-// and the same one the bitemporal store uses for its entity index. Three
-// structures, one layout: contiguous data plus an offset table beats pointer
-// chasing every time, and it serialises to a snapshot with no fixups.
+// The bitemporal store uses this same jagged-offset layout for its entity
+// index. Two structures, one idiom: contiguous data plus an offset table beats
+// pointer chasing every time, and it serialises to a snapshot with no fixups.
 //
 // `edge_ref` is the detail that is easy to omit and shouldn't be: it points
 // back at the fact that created each edge, so the UI can answer "why is there

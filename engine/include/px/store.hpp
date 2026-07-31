@@ -155,9 +155,8 @@ class Store {
   [[nodiscard]] const i32* valid_to_data() const noexcept { return valid_to_.data(); }
 
   /// Same slice, restricted to one entity, served from the CSR index rather
-  /// than by scanning. Same shape as the sprayStart/sprayBase offset arrays in
-  /// brain3d.ts: entity_offset_[e]..entity_offset_[e+1] is a contiguous range
-  /// of that entity's rows.
+  /// than by scanning: entity_offset_[e]..entity_offset_[e+1] is a contiguous
+  /// range of that entity's rows.
   void as_of_entity(EntityId entity, Timestamp valid_at, TxnId sys_at,
                     std::vector<FactId>& out, ScanStats* stats = nullptr) const;
 
