@@ -52,6 +52,17 @@ export type Category = (typeof CATEGORIES)[number]
 export interface AttrDecl {
   name: string
   sensitivity: Sensitivity
+  /**
+   * True when an equality test on this attribute picks out ONE real asset.
+   *
+   * Declared here for the same reason sensitivity is: the source publishing a
+   * field is the only thing that knows whether it identifies. R1 — the rule that
+   * refuses "identify one asset" queries — used to consult a hardcoded list of
+   * field names in session.cpp (`mmsi`, `callsign`, `id`, `imo`) that no source
+   * in this project actually declares, so the rule could only be triggered by
+   * naming a field that does not exist and never fired on real data.
+   */
+  identifying?: boolean
 }
 
 /** Resolved attribute ids, keyed by the names an AttrDecl declared. */

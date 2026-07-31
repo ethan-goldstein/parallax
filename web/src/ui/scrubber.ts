@@ -199,6 +199,36 @@ export class Scrubber {
   }
 
   /**
+   * Parks both axes and stops them tracking the present, exactly as a drag does.
+   *
+   * Distinct from `setValidAt`, which is the clock advancing. Anything moving
+   * the axes on a viewer's BEHALF has to pin them, or the follow tick in main.ts
+   * snaps straight back to now — which is what silently undid every axis move the
+   * guided tour made, leaving it narrating a rewind that never happened.
+   */
+  pin(next: Partial<ScrubberState>): void {
+    if (next.validAt !== undefined) {
+      this.#state.validAt = Math.min(
+        Math.max(next.validAt, this.#opts.validMin),
+        this.#opts.validMax,
+      )
+    }
+    if (next.sysAt !== undefined) {
+      this.#state.sysAt = Math.min(
+        Math.max(next.sysAt, 0),
+        Math.max(0, this.#opts.transactions.length - 1),
+      )
+    }
+    this.#followNow = false
+    this.draw()
+  }
+
+  /** Resumes tracking the present. */
+  release(): void {
+    this.#followNow = true
+  }
+
+  /**
    * Moves the valid axis without ending follow mode.
    *
    * Distinct from a drag on purpose: this is the clock advancing, not a person

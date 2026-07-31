@@ -4,7 +4,37 @@ A bitemporal analytical engine written in C++20 and compiled to WebAssembly. It 
 ***"what did we believe at system-time S, about valid-time T?"*** — over live open-source
 intelligence feeds, entirely in your browser. No backend, no API keys, no login.
 
-**[▶ Live demo](https://ethan-goldstein.github.io/parallax/)**
+**[▶ Live demo](https://ethan-goldstein.github.io/parallax/)** — the *show me* button runs a
+scripted minute that drives the real controls.
+
+---
+
+## In ninety seconds
+
+A map of live open-source intelligence — aircraft, vessels, earthquakes, weather warnings,
+satellites, ports. That part is ordinary.
+
+What is not ordinary is that **every fact carries two clocks**: when it was true, and when we learned
+it. The panel along the bottom is both axes, and dragging the vertical one rewinds *what was known*
+rather than what happened. Same instant, less knowledge — which is the question an analyst actually
+has after a magnitude is revised from 4.8 to 5.2 six hours late, and which no dashboard that
+overwrites values in place can answer at all.
+
+Underneath is a bitemporal columnar store and a cost-based query planner, **written in C++20 and
+compiled to WebAssembly**. It plans each query, shows the access path it chose and where its own row
+estimate was wrong, and **refuses questions** that narrow to a single identifiable asset — before
+reading a row, because the check runs against the plan rather than the results.
+
+No backend, no API keys, no login. Every source is keyless, CORS-open, and named with its licence.
+
+**Try these:**
+[the guided tour](https://ethan-goldstein.github.io/parallax/?tour=1) ·
+[a query and its plan](https://ethan-goldstein.github.io/parallax/?q=earthquakes%20where%20magnitude%20%3E%204.5%20order%20by%20magnitude%20desc%20limit%2020) ·
+[a query the engine refuses](https://ethan-goldstein.github.io/parallax/?q=aircraft%20where%20aircraft_label%20%3D%20%22RCH123%22)
+
+For reviewers: [`docs/decisions/`](docs/decisions/) records what was decided, what it cost, and what
+it ruled out — including one reversal and two mistakes that were caught by measuring rather than by
+reasoning.
 
 ---
 

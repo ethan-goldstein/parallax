@@ -1966,3 +1966,107 @@ body:has(.dock[hidden]) .maplibregl-ctrl-bottom-left {
   padding-top: 0;
   opacity: 0.75;
 }
+
+/* ── guided tour ─────────────────────────────────────────────────────────────
+   A caption strip that narrates while the real controls move underneath it.
+   Deliberately NOT a modal: the point is to watch the map and the scrubber
+   respond, so anything that dims or covers them defeats the exercise.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.tour-start {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tracking-hud);
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tour-start:disabled { opacity: 0.45; cursor: default; }
+
+.tour-start-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bg);
+  /* One slow pulse. Enough to be noticed on arrival, not enough to nag. */
+  animation: tour-pulse 2.4s var(--ease) infinite;
+}
+
+@keyframes tour-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-start-dot { animation: none; }
+}
+
+.tour {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--rail-bottom) + 3.5rem);
+  z-index: 8;
+  width: min(46rem, calc(100vw - 2 * var(--s-6)));
+  pointer-events: none;
+  animation: tour-in var(--dur) var(--ease);
+}
+
+@keyframes tour-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.tour-body {
+  padding: var(--s-3) var(--s-4);
+  background: color-mix(in srgb, var(--panel-raised) 96%, transparent);
+  backdrop-filter: blur(14px) saturate(115%);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius);
+  pointer-events: auto;
+}
+
+.tour-say {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-top: var(--s-2);
+}
+
+.tour-dots { color: var(--ink-faint); }
+
+.tour-skip {
+  padding: 2px var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.tour-skip:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+@media (max-width: 700px) {
+  .tour { bottom: calc(var(--rail-bottom) + 6rem); }
+  .tour-say { font-size: var(--fs-small); }
+}

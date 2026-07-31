@@ -97,6 +97,20 @@ struct PolicyDecision {
 struct AttributePolicy {
   SymbolId attr{};
   Sensitivity sensitivity = Sensitivity::Public;
+  /**
+   * True when an equality test on this attribute picks out ONE real asset.
+   *
+   * Declared per attribute, exactly as sensitivity is, and for the same reason:
+   * the source that publishes a field is the only thing that knows whether it
+   * identifies. The alternative — and what this replaced — was a hardcoded list
+   * of field NAMES (`mmsi`, `callsign`, `id`, `imo`) compared against the query
+   * text in session.cpp. That list went stale the moment it was written: no
+   * source in this project declares any of those four, so R1 could be triggered
+   * only by naming a field that does not exist, and could never fire on real
+   * data. A central list of names is a list that drifts from the data silently,
+   * which is the failure spec.ts already argues against for sensitivity.
+   */
+  bool identifying = false;
 };
 
 /// Inputs a rule can see. Deliberately the PLAN's properties rather than the
@@ -129,6 +143,10 @@ class PolicyEngine {
 
   void set_sensitivity(SymbolId attr, Sensitivity s);
   [[nodiscard]] Sensitivity sensitivity_of(SymbolId attr) const noexcept;
+
+  /// Declares that equality on this attribute narrows to one asset.
+  void set_identifying(SymbolId attr, bool identifying);
+  [[nodiscard]] bool is_identifying(SymbolId attr) const noexcept;
 
   /// Evaluates every rule. Returns the FIRST denial, so the explanation names
   /// one concrete reason rather than a list the user has to triage.

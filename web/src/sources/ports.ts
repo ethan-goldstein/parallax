@@ -36,12 +36,15 @@ interface PortRecord {
   lat: number
   lon: number
   class: number
+  /** `way/123` — the OSM element this coordinate came from, where one exists. */
+  osm?: string
 }
 
 interface ChokepointRecord {
   name: string
   lat: number
   lon: number
+  osm?: string
 }
 
 export interface PortsFile {
@@ -88,7 +91,7 @@ export const portsSpec: SourceSpec<PortsFile> = {
   layer: 'ports',
   assets: [ASSET],
   coverageNote:
-    'hand-curated reference set, not a registry — a port spanning tens of km is drawn at one point',
+    'curated selection, coordinates from OpenStreetMap — a port spanning tens of km is drawn at one point',
   attributes: [
     { name: 'port_position', sensitivity: Sensitivity.Public },
     // A berth is not a person and not a moving asset. Public.

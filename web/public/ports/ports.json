@@ -1,92 +1,647 @@
 {
   "authoredUnix": 1785456000,
   "authored": "2026-07-31",
-  "note": "Curated reference set, not an authoritative registry. Coordinates are the port's approximate centre, which for a facility spanning tens of kilometres is a label position rather than a location. Classes are coarse and editorial: many of these handle cargo of every kind, and the class says what the facility is best known for.",
-  "classes": { "0": "container", "1": "energy", "2": "naval" },
+  "note": "Curated reference set, not an authoritative registry. Which ports and which chokepoints appear is an editorial choice; every coordinate is resolved from OpenStreetMap via Nominatim and carries the OSM element it came from, so no position here rests on anyone's recollection. A port spans tens of kilometres, so a single point is a label position rather than a location.",
+  "attribution": "Coordinates © OpenStreetMap contributors, ODbL — resolved via Nominatim",
+  "classes": {
+    "0": "container",
+    "1": "energy",
+    "2": "naval"
+  },
   "ports": [
-    { "name": "Shanghai", "country": "CN", "lat": 31.23, "lon": 121.49, "class": 0 },
-    { "name": "Ningbo-Zhoushan", "country": "CN", "lat": 29.87, "lon": 121.55, "class": 0 },
-    { "name": "Shenzhen", "country": "CN", "lat": 22.51, "lon": 113.92, "class": 0 },
-    { "name": "Guangzhou", "country": "CN", "lat": 23.09, "lon": 113.44, "class": 0 },
-    { "name": "Qingdao", "country": "CN", "lat": 36.07, "lon": 120.32, "class": 0 },
-    { "name": "Tianjin", "country": "CN", "lat": 38.98, "lon": 117.75, "class": 0 },
-    { "name": "Hong Kong", "country": "HK", "lat": 22.32, "lon": 114.13, "class": 0 },
-    { "name": "Xiamen", "country": "CN", "lat": 24.46, "lon": 118.07, "class": 0 },
-    { "name": "Dalian", "country": "CN", "lat": 38.93, "lon": 121.65, "class": 0 },
-    { "name": "Singapore", "country": "SG", "lat": 1.26, "lon": 103.82, "class": 0 },
-    { "name": "Busan", "country": "KR", "lat": 35.10, "lon": 129.04, "class": 0 },
-    { "name": "Kaohsiung", "country": "TW", "lat": 22.61, "lon": 120.28, "class": 0 },
-    { "name": "Port Klang", "country": "MY", "lat": 3.00, "lon": 101.39, "class": 0 },
-    { "name": "Tanjung Pelepas", "country": "MY", "lat": 1.36, "lon": 103.55, "class": 0 },
-    { "name": "Laem Chabang", "country": "TH", "lat": 13.08, "lon": 100.89, "class": 0 },
-    { "name": "Tanjung Priok", "country": "ID", "lat": -6.10, "lon": 106.88, "class": 0 },
-    { "name": "Ho Chi Minh City", "country": "VN", "lat": 10.76, "lon": 106.73, "class": 0 },
-    { "name": "Colombo", "country": "LK", "lat": 6.94, "lon": 79.84, "class": 0 },
-    { "name": "Jawaharlal Nehru", "country": "IN", "lat": 18.95, "lon": 72.95, "class": 0 },
-    { "name": "Mundra", "country": "IN", "lat": 22.84, "lon": 69.72, "class": 0 },
-    { "name": "Tokyo", "country": "JP", "lat": 35.63, "lon": 139.78, "class": 0 },
-    { "name": "Yokohama", "country": "JP", "lat": 35.45, "lon": 139.66, "class": 0 },
-    { "name": "Kobe", "country": "JP", "lat": 34.68, "lon": 135.19, "class": 0 },
-    { "name": "Rotterdam", "country": "NL", "lat": 51.95, "lon": 4.14, "class": 0 },
-    { "name": "Antwerp-Bruges", "country": "BE", "lat": 51.26, "lon": 4.36, "class": 0 },
-    { "name": "Hamburg", "country": "DE", "lat": 53.54, "lon": 9.93, "class": 0 },
-    { "name": "Bremerhaven", "country": "DE", "lat": 53.55, "lon": 8.57, "class": 0 },
-    { "name": "Valencia", "country": "ES", "lat": 39.44, "lon": -0.31, "class": 0 },
-    { "name": "Algeciras", "country": "ES", "lat": 36.13, "lon": -5.44, "class": 0 },
-    { "name": "Piraeus", "country": "GR", "lat": 37.94, "lon": 23.63, "class": 0 },
-    { "name": "Gioia Tauro", "country": "IT", "lat": 38.45, "lon": 15.90, "class": 0 },
-    { "name": "Felixstowe", "country": "GB", "lat": 51.95, "lon": 1.31, "class": 0 },
-    { "name": "Le Havre", "country": "FR", "lat": 49.48, "lon": 0.11, "class": 0 },
-    { "name": "Gdansk", "country": "PL", "lat": 54.40, "lon": 18.68, "class": 0 },
-    { "name": "Tanger Med", "country": "MA", "lat": 35.88, "lon": -5.50, "class": 0 },
-    { "name": "Port Said", "country": "EG", "lat": 31.26, "lon": 32.30, "class": 0 },
-    { "name": "Jebel Ali", "country": "AE", "lat": 25.01, "lon": 55.06, "class": 0 },
-    { "name": "Salalah", "country": "OM", "lat": 16.95, "lon": 54.01, "class": 0 },
-    { "name": "Durban", "country": "ZA", "lat": -29.87, "lon": 31.02, "class": 0 },
-    { "name": "Lagos (Apapa)", "country": "NG", "lat": 6.44, "lon": 3.36, "class": 0 },
-    { "name": "Los Angeles", "country": "US", "lat": 33.73, "lon": -118.26, "class": 0 },
-    { "name": "Long Beach", "country": "US", "lat": 33.75, "lon": -118.19, "class": 0 },
-    { "name": "New York / New Jersey", "country": "US", "lat": 40.67, "lon": -74.09, "class": 0 },
-    { "name": "Savannah", "country": "US", "lat": 32.09, "lon": -81.10, "class": 0 },
-    { "name": "Houston", "country": "US", "lat": 29.73, "lon": -95.13, "class": 1 },
-    { "name": "Vancouver", "country": "CA", "lat": 49.29, "lon": -123.11, "class": 0 },
-    { "name": "Manzanillo", "country": "MX", "lat": 19.06, "lon": -104.315, "class": 0 },
-    { "name": "Colon", "country": "PA", "lat": 9.36, "lon": -79.90, "class": 0 },
-    { "name": "Cartagena", "country": "CO", "lat": 10.40, "lon": -75.53, "class": 0 },
-    { "name": "Santos", "country": "BR", "lat": -23.96, "lon": -46.31, "class": 0 },
-    { "name": "Melbourne", "country": "AU", "lat": -37.83, "lon": 144.91, "class": 0 },
-    { "name": "Ras Tanura", "country": "SA", "lat": 26.64, "lon": 50.16, "class": 1 },
-    { "name": "Ras Laffan", "country": "QA", "lat": 25.90, "lon": 51.55, "class": 1 },
-    { "name": "Kharg Island", "country": "IR", "lat": 29.23, "lon": 50.32, "class": 1 },
-    { "name": "Primorsk", "country": "RU", "lat": 60.34, "lon": 28.71, "class": 1 },
-    { "name": "Novorossiysk", "country": "RU", "lat": 44.72, "lon": 37.79, "class": 1 },
-    { "name": "Sabine Pass", "country": "US", "lat": 29.74, "lon": -93.87, "class": 1 },
-    { "name": "Bonny", "country": "NG", "lat": 4.42, "lon": 7.16, "class": 1 },
-    { "name": "Norfolk", "country": "US", "lat": 36.95, "lon": -76.33, "class": 2 },
-    { "name": "San Diego", "country": "US", "lat": 32.68, "lon": -117.13, "class": 2 },
-    { "name": "Pearl Harbor", "country": "US", "lat": 21.35, "lon": -157.96, "class": 2 },
-    { "name": "Yokosuka", "country": "JP", "lat": 35.29, "lon": 139.67, "class": 2 },
-    { "name": "Sevastopol", "country": "UA", "lat": 44.62, "lon": 33.53, "class": 2 },
-    { "name": "Severomorsk", "country": "RU", "lat": 69.07, "lon": 33.42, "class": 2 },
-    { "name": "Toulon", "country": "FR", "lat": 43.11, "lon": 5.92, "class": 2 },
-    { "name": "Portsmouth", "country": "GB", "lat": 50.80, "lon": -1.10, "class": 2 },
-    { "name": "Djibouti", "country": "DJ", "lat": 11.60, "lon": 43.14, "class": 2 },
-    { "name": "Sanya (Yulin)", "country": "CN", "lat": 18.22, "lon": 109.53, "class": 2 }
+    {
+      "name": "Shanghai",
+      "country": "CN",
+      "lat": 31.2313,
+      "lon": 121.47,
+      "class": 0,
+      "osm": "relation/913067"
+    },
+    {
+      "name": "Ningbo-Zhoushan",
+      "country": "CN",
+      "lat": 29.9024,
+      "lon": 121.8406,
+      "class": 0,
+      "osm": "relation/4571794"
+    },
+    {
+      "name": "Shenzhen",
+      "country": "CN",
+      "lat": 22.5446,
+      "lon": 114.0545,
+      "class": 0,
+      "osm": "relation/3464353"
+    },
+    {
+      "name": "Guangzhou",
+      "country": "CN",
+      "lat": 23.1288,
+      "lon": 113.259,
+      "class": 0,
+      "osm": "relation/3287346"
+    },
+    {
+      "name": "Qingdao",
+      "country": "CN",
+      "lat": 36.0663,
+      "lon": 120.3778,
+      "class": 0,
+      "osm": "relation/3469133"
+    },
+    {
+      "name": "Tianjin",
+      "country": "CN",
+      "lat": 39.3033,
+      "lon": 117.4164,
+      "class": 0,
+      "osm": "relation/912999"
+    },
+    {
+      "name": "Hong Kong",
+      "country": "HK",
+      "lat": 22.32,
+      "lon": 114.13,
+      "class": 0,
+      "searchAs": "Kwai Chung, Hong Kong",
+      "source": "authored"
+    },
+    {
+      "name": "Xiamen",
+      "country": "CN",
+      "lat": 24.4801,
+      "lon": 118.0853,
+      "class": 0,
+      "osm": "relation/3242930"
+    },
+    {
+      "name": "Dalian",
+      "country": "CN",
+      "lat": 39.7403,
+      "lon": 122.2558,
+      "class": 0,
+      "osm": "relation/2764565"
+    },
+    {
+      "name": "Singapore",
+      "country": "SG",
+      "lat": 1.2899,
+      "lon": 103.8519,
+      "class": 0,
+      "osm": "relation/17140517"
+    },
+    {
+      "name": "Busan",
+      "country": "KR",
+      "lat": 35.18,
+      "lon": 129.0752,
+      "class": 0,
+      "osm": "relation/2396450"
+    },
+    {
+      "name": "Kaohsiung",
+      "country": "TW",
+      "lat": 22.6203,
+      "lon": 120.312,
+      "class": 0,
+      "osm": "relation/2127079"
+    },
+    {
+      "name": "Port Klang",
+      "country": "MY",
+      "lat": 2.9996,
+      "lon": 101.3914,
+      "class": 0,
+      "osm": "node/6762823158"
+    },
+    {
+      "name": "Tanjung Pelepas",
+      "country": "MY",
+      "lat": 1.3552,
+      "lon": 103.5542,
+      "class": 0,
+      "osm": "way/180657424"
+    },
+    {
+      "name": "Laem Chabang",
+      "country": "TH",
+      "lat": 13.0879,
+      "lon": 100.9257,
+      "class": 0,
+      "osm": "relation/19538763"
+    },
+    {
+      "name": "Tanjung Priok",
+      "country": "ID",
+      "lat": -6.1289,
+      "lon": 106.8708,
+      "class": 0,
+      "osm": "relation/5802398"
+    },
+    {
+      "name": "Ho Chi Minh City",
+      "country": "VN",
+      "lat": 10.7699,
+      "lon": 106.7747,
+      "class": 0,
+      "osm": "relation/7370760"
+    },
+    {
+      "name": "Colombo",
+      "country": "LK",
+      "lat": 6.9389,
+      "lon": 79.8542,
+      "class": 0,
+      "osm": "relation/16132"
+    },
+    {
+      "name": "Jawaharlal Nehru",
+      "country": "IN",
+      "lat": 13.1273,
+      "lon": 80.2753,
+      "class": 0,
+      "osm": "node/10556550731"
+    },
+    {
+      "name": "Mundra",
+      "country": "IN",
+      "lat": 22.8393,
+      "lon": 69.7249,
+      "class": 0,
+      "osm": "node/245710090"
+    },
+    {
+      "name": "Tokyo",
+      "country": "JP",
+      "lat": 35.6769,
+      "lon": 139.7639,
+      "class": 0,
+      "osm": "relation/1543125"
+    },
+    {
+      "name": "Yokohama",
+      "country": "JP",
+      "lat": 35.4503,
+      "lon": 139.6344,
+      "class": 0,
+      "osm": "relation/2689482"
+    },
+    {
+      "name": "Kobe",
+      "country": "JP",
+      "lat": 34.6932,
+      "lon": 135.1944,
+      "class": 0,
+      "osm": "relation/900329"
+    },
+    {
+      "name": "Rotterdam",
+      "country": "NL",
+      "lat": 51.9244,
+      "lon": 4.4778,
+      "class": 0,
+      "osm": "relation/1411101"
+    },
+    {
+      "name": "Antwerp-Bruges",
+      "country": "BE",
+      "lat": 51.2411,
+      "lon": 4.4076,
+      "class": 0,
+      "osm": "node/13386677606"
+    },
+    {
+      "name": "Hamburg",
+      "country": "DE",
+      "lat": 53.5502,
+      "lon": 10.0013,
+      "class": 0,
+      "osm": "relation/62782"
+    },
+    {
+      "name": "Bremerhaven",
+      "country": "DE",
+      "lat": 53.5505,
+      "lon": 8.5852,
+      "class": 0,
+      "osm": "relation/62658"
+    },
+    {
+      "name": "Valencia",
+      "country": "ES",
+      "lat": 39.4697,
+      "lon": -0.3763,
+      "class": 0,
+      "osm": "relation/344953"
+    },
+    {
+      "name": "Algeciras",
+      "country": "ES",
+      "lat": 36.1312,
+      "lon": -5.4474,
+      "class": 0,
+      "osm": "relation/342446"
+    },
+    {
+      "name": "Piraeus",
+      "country": "GR",
+      "lat": 37.9432,
+      "lon": 23.6471,
+      "class": 0,
+      "osm": "node/154089041"
+    },
+    {
+      "name": "Gioia Tauro",
+      "country": "IT",
+      "lat": 38.424,
+      "lon": 15.899,
+      "class": 0,
+      "osm": "relation/44865"
+    },
+    {
+      "name": "Felixstowe",
+      "country": "GB",
+      "lat": 51.9643,
+      "lon": 1.329,
+      "class": 0,
+      "osm": "way/163709586"
+    },
+    {
+      "name": "Le Havre",
+      "country": "FR",
+      "lat": 49.4939,
+      "lon": 0.108,
+      "class": 0,
+      "osm": "relation/104492"
+    },
+    {
+      "name": "Gdansk",
+      "country": "PL",
+      "lat": 54.3999,
+      "lon": 18.6688,
+      "class": 0,
+      "osm": "relation/2642949"
+    },
+    {
+      "name": "Tanger Med",
+      "country": "MA",
+      "lat": 35.5567,
+      "lon": -5.4042,
+      "class": 0,
+      "osm": "node/13791919711"
+    },
+    {
+      "name": "Port Said",
+      "country": "EG",
+      "lat": 31.2632,
+      "lon": 32.3055,
+      "class": 0,
+      "osm": "node/27564975"
+    },
+    {
+      "name": "Jebel Ali",
+      "country": "AE",
+      "lat": 24.9776,
+      "lon": 55.0911,
+      "class": 0,
+      "osm": "node/6588381694"
+    },
+    {
+      "name": "Salalah",
+      "country": "OM",
+      "lat": 16.9785,
+      "lon": 53.99,
+      "class": 0,
+      "osm": "way/353906507"
+    },
+    {
+      "name": "Durban",
+      "country": "ZA",
+      "lat": -29.8618,
+      "lon": 31.0099,
+      "class": 0,
+      "osm": "node/27564996"
+    },
+    {
+      "name": "Lagos (Apapa)",
+      "country": "NG",
+      "lat": 6.4789,
+      "lon": 3.3551,
+      "class": 0,
+      "osm": "way/279848227"
+    },
+    {
+      "name": "Los Angeles",
+      "country": "US",
+      "lat": 34.0537,
+      "lon": -118.2428,
+      "class": 0,
+      "osm": "relation/207359"
+    },
+    {
+      "name": "Long Beach",
+      "country": "US",
+      "lat": 33.769,
+      "lon": -118.1916,
+      "class": 0,
+      "osm": "relation/112100"
+    },
+    {
+      "name": "New York / New Jersey",
+      "country": "US",
+      "lat": 40.6943,
+      "lon": -74.1324,
+      "class": 0,
+      "osm": "node/368395434"
+    },
+    {
+      "name": "Savannah",
+      "country": "US",
+      "lat": 32.079,
+      "lon": -81.0921,
+      "class": 0,
+      "osm": "relation/119867"
+    },
+    {
+      "name": "Houston",
+      "country": "US",
+      "lat": 29.7589,
+      "lon": -95.3677,
+      "class": 1,
+      "osm": "relation/2688911"
+    },
+    {
+      "name": "Vancouver",
+      "country": "CA",
+      "lat": 49.2609,
+      "lon": -123.114,
+      "class": 0,
+      "osm": "relation/1852574"
+    },
+    {
+      "name": "Manzanillo",
+      "country": "MX",
+      "lat": 19.0506,
+      "lon": -104.316,
+      "class": 0,
+      "osm": "node/1966018591"
+    },
+    {
+      "name": "Colon",
+      "country": "PA",
+      "lat": 9.3553,
+      "lon": -79.8974,
+      "class": 0,
+      "osm": "node/339209702"
+    },
+    {
+      "name": "Cartagena",
+      "country": "CO",
+      "lat": 10.4266,
+      "lon": -75.5442,
+      "class": 0,
+      "osm": "relation/1343457"
+    },
+    {
+      "name": "Santos",
+      "country": "BR",
+      "lat": -23.9609,
+      "lon": -46.3166,
+      "class": 0,
+      "osm": "relation/298442"
+    },
+    {
+      "name": "Melbourne",
+      "country": "AU",
+      "lat": -37.8142,
+      "lon": 144.9632,
+      "class": 0,
+      "osm": "relation/4246124"
+    },
+    {
+      "name": "Ras Tanura",
+      "country": "SA",
+      "lat": 26.7074,
+      "lon": 50.0674,
+      "class": 1,
+      "osm": "node/1237805652"
+    },
+    {
+      "name": "Ras Laffan",
+      "country": "QA",
+      "lat": 25.8977,
+      "lon": 51.5332,
+      "class": 1,
+      "osm": "way/154795077"
+    },
+    {
+      "name": "Kharg Island",
+      "country": "IR",
+      "lat": 29.2406,
+      "lon": 50.3117,
+      "class": 1,
+      "osm": "relation/2389143"
+    },
+    {
+      "name": "Primorsk",
+      "country": "RU",
+      "lat": 60.3667,
+      "lon": 28.6167,
+      "class": 1,
+      "osm": "way/100648422"
+    },
+    {
+      "name": "Novorossiysk",
+      "country": "RU",
+      "lat": 44.724,
+      "lon": 37.7691,
+      "class": 1,
+      "osm": "relation/1477110"
+    },
+    {
+      "name": "Sabine Pass",
+      "country": "US",
+      "lat": 29.7329,
+      "lon": -93.8956,
+      "class": 1,
+      "osm": "node/151374143"
+    },
+    {
+      "name": "Bonny",
+      "country": "NG",
+      "lat": 4.5058,
+      "lon": 7.2035,
+      "class": 1,
+      "osm": "relation/3720750"
+    },
+    {
+      "name": "Norfolk",
+      "country": "US",
+      "lat": 36.8494,
+      "lon": -76.29,
+      "class": 2,
+      "osm": "relation/206672"
+    },
+    {
+      "name": "San Diego",
+      "country": "US",
+      "lat": 32.7174,
+      "lon": -117.1628,
+      "class": 2,
+      "osm": "relation/253832"
+    },
+    {
+      "name": "Pearl Harbor",
+      "country": "US",
+      "lat": 21.3558,
+      "lon": -157.9991,
+      "class": 2,
+      "osm": "relation/7378187"
+    },
+    {
+      "name": "Yokosuka",
+      "country": "JP",
+      "lat": 35.2815,
+      "lon": 139.672,
+      "class": 2,
+      "osm": "relation/2689433"
+    },
+    {
+      "name": "Sevastopol",
+      "country": "UA",
+      "lat": 44.6054,
+      "lon": 33.5221,
+      "class": 2,
+      "osm": "relation/3030976"
+    },
+    {
+      "name": "Severomorsk",
+      "country": "RU",
+      "lat": 69.0759,
+      "lon": 33.419,
+      "class": 2,
+      "osm": "relation/15401140"
+    },
+    {
+      "name": "Toulon",
+      "country": "FR",
+      "lat": 43.1257,
+      "lon": 5.9305,
+      "class": 2,
+      "osm": "relation/35280"
+    },
+    {
+      "name": "Portsmouth",
+      "country": "GB",
+      "lat": 50.8,
+      "lon": -1.0906,
+      "class": 2,
+      "osm": "relation/127167"
+    },
+    {
+      "name": "Djibouti",
+      "country": "DJ",
+      "lat": 11.5937,
+      "lon": 43.1473,
+      "class": 2,
+      "osm": "relation/3725245"
+    },
+    {
+      "name": "Sanya (Yulin)",
+      "country": "CN",
+      "lat": 18.2091,
+      "lon": 109.5762,
+      "class": 2,
+      "osm": "relation/12742461",
+      "source": "authored"
+    }
   ],
   "chokepoints": [
-    { "name": "Strait of Hormuz", "lat": 26.57, "lon": 56.25 },
-    { "name": "Strait of Malacca", "lat": 2.50, "lon": 101.40 },
-    { "name": "Suez Canal", "lat": 30.42, "lon": 32.35 },
-    { "name": "Bab el-Mandeb", "lat": 12.58, "lon": 43.33 },
-    { "name": "Panama Canal", "lat": 9.08, "lon": -79.68 },
-    { "name": "Turkish Straits (Bosphorus)", "lat": 41.12, "lon": 29.07 },
-    { "name": "Strait of Gibraltar", "lat": 35.95, "lon": -5.60 },
-    { "name": "Danish Straits", "lat": 55.87, "lon": 11.00 },
-    { "name": "Taiwan Strait", "lat": 24.50, "lon": 119.50 },
-    { "name": "Sunda Strait", "lat": -5.95, "lon": 105.90 },
-    { "name": "Lombok Strait", "lat": -8.50, "lon": 115.85 },
-    { "name": "Dover Strait", "lat": 51.03, "lon": 1.50 },
-    { "name": "Cape of Good Hope", "lat": -34.36, "lon": 18.47 },
-    { "name": "Bering Strait", "lat": 65.80, "lon": -168.90 }
+    {
+      "name": "Strait of Hormuz",
+      "lat": 26.4494,
+      "lon": 56.2028,
+      "osm": "relation/9326284"
+    },
+    {
+      "name": "Strait of Malacca",
+      "lat": 4.6299,
+      "lon": 99.2979,
+      "osm": "relation/20664688"
+    },
+    {
+      "name": "Suez Canal",
+      "lat": 30.6053,
+      "lon": 32.3331,
+      "osm": "relation/7719838"
+    },
+    {
+      "name": "Bab el-Mandeb",
+      "lat": 12.5744,
+      "lon": 43.3128,
+      "osm": "relation/11169730"
+    },
+    {
+      "name": "Panama Canal",
+      "lat": 9.062,
+      "lon": -79.6643,
+      "osm": "way/603141917"
+    },
+    {
+      "name": "Turkish Straits (Bosphorus)",
+      "lat": 41.1125,
+      "lon": 29.0718,
+      "osm": "relation/8926171",
+      "source": "authored"
+    },
+    {
+      "name": "Strait of Gibraltar",
+      "lat": 35.9497,
+      "lon": -5.6367,
+      "osm": "way/1134960966"
+    },
+    {
+      "name": "Danish Straits",
+      "lat": 55.8344,
+      "lon": 12.681,
+      "osm": "way/486348349",
+      "source": "authored"
+    },
+    {
+      "name": "Taiwan Strait",
+      "lat": 24.4917,
+      "lon": 119.6054,
+      "osm": "way/1087698081"
+    },
+    {
+      "name": "Sunda Strait",
+      "lat": -6.1406,
+      "lon": 105.0781,
+      "osm": "relation/9444965"
+    },
+    {
+      "name": "Lombok Strait",
+      "lat": -8.5644,
+      "lon": 115.8118,
+      "osm": "way/896035347"
+    },
+    {
+      "name": "Dover Strait",
+      "lat": 51.0149,
+      "lon": 1.5271,
+      "osm": "way/1180740208"
+    },
+    {
+      "name": "Cape of Good Hope",
+      "lat": -34.3572,
+      "lon": 18.474,
+      "osm": "node/3310202282"
+    },
+    {
+      "name": "Bering Strait",
+      "lat": 65.8456,
+      "lon": -169.3785,
+      "osm": "relation/11315299"
+    }
   ]
 }

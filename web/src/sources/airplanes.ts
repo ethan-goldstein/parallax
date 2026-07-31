@@ -187,7 +187,9 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
     { name: 'altitude', sensitivity: Sensitivity.Public },
     // Public: a callsign is broadcast unencrypted by the aircraft. It is not a
     // person, and nothing here resolves it to one.
-    { name: 'aircraft_label', sensitivity: Sensitivity.Public },
+    // Identifying: a callsign picks out one airframe, which is precisely the
+    // narrowing R1 exists to refuse under a purpose that does not permit it.
+    { name: 'aircraft_label', sensitivity: Sensitivity.Public, identifying: true },
   ],
   fetch: (signal) => fetchMilitaryAircraft(AIRPLANES_MIL_URL, signal),
   normalize(raw, ctx) {
@@ -271,7 +273,7 @@ export const civilAircraftSpec: SourceSpec<{
     // layers queried the same attribute and rendered the same 198 aircraft.
     { name: 'civil_position', sensitivity: Sensitivity.Precise },
     { name: 'civil_altitude', sensitivity: Sensitivity.Public },
-    { name: 'civil_label', sensitivity: Sensitivity.Public },
+    { name: 'civil_label', sensitivity: Sensitivity.Public, identifying: true },
   ],
   fetch: (signal, view) => {
     if (!view) throw new Error('civil aircraft needs a viewport')

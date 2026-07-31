@@ -39,6 +39,26 @@ void PolicyEngine::set_sensitivity(SymbolId attr, Sensitivity s) {
   attrs_.push_back(AttributePolicy{attr, s});
 }
 
+void PolicyEngine::set_identifying(SymbolId attr, bool identifying) {
+  for (AttributePolicy& a : attrs_) {
+    if (a.attr == attr) {
+      a.identifying = identifying;
+      return;
+    }
+  }
+  attrs_.push_back(AttributePolicy{attr, Sensitivity::Public, identifying});
+}
+
+bool PolicyEngine::is_identifying(SymbolId attr) const noexcept {
+  for (const AttributePolicy& a : attrs_) {
+    if (a.attr == attr) return a.identifying;
+  }
+  // Undeclared attributes do not identify. Fail-open here is safe for the same
+  // narrow reason it is for sensitivity — see the note below — and unlike
+  // sensitivity, a false negative costs a refusal rather than a disclosure.
+  return false;
+}
+
 Sensitivity PolicyEngine::sensitivity_of(SymbolId attr) const noexcept {
   for (const AttributePolicy& a : attrs_) {
     if (a.attr == attr) return a.sensitivity;

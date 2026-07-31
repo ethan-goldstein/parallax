@@ -27,6 +27,15 @@ import type { IngestResult, Ingestor } from './ingest'
 /** Coarse tick. A source's own `pollSeconds` is what actually paces it. */
 const TICK_MS = 5_000
 
+/**
+ * Cap on any single fetch in a poll cycle.
+ *
+ * Generous compared to the boot cap, because nothing is waiting on a poll — but
+ * still finite, so one endpoint that has stopped answering cannot pin a cycle
+ * open and block every source behind it indefinitely.
+ */
+const POLL_TIMEOUT_MS = 20_000
+
 export interface SchedulerOptions {
   ingestor: Ingestor
   specs: readonly SourceSpec[]
@@ -174,6 +183,7 @@ export class Scheduler {
       const view = this.#opts.viewport()
       const result = await this.#opts.ingestor.cycle({
         signal: this.#abort.signal,
+        timeoutMs: POLL_TIMEOUT_MS,
         only: due,
         ...(view ? { view } : {}),
       })

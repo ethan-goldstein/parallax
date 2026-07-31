@@ -87,10 +87,15 @@ export const SOURCES: Record<string, SourceMeta> = {
     key: 'ports',
     name: 'PARALLAX curated port reference',
     url: 'https://github.com/ethan-goldstein/parallax',
-    license: 'Authored for this project — CC0',
-    spdx: 'CC0-1.0',
-    attribution: 'PARALLAX curated dataset',
-    shareAlike: false,
+    // Two things with two licences. The SELECTION — which ports and which
+    // chokepoints are worth drawing — is authored here. The COORDINATES are
+    // resolved from OpenStreetMap and each carries the OSM element id, so ODbL
+    // applies and share-alike is real. Claiming CC0 over the whole thing would
+    // be claiming a licence over somebody else's data.
+    license: 'Selection authored here (CC0); coordinates from OpenStreetMap (ODbL)',
+    spdx: 'CC0-1.0 AND ODbL-1.0',
+    attribution: 'PARALLAX curated selection; coordinates © OpenStreetMap contributors (ODbL)',
+    shareAlike: true,
     nonCommercial: false,
     typicalMs: 20,
   },
@@ -100,10 +105,15 @@ export const SOURCES: Record<string, SourceMeta> = {
     key: 'chokepoints',
     name: 'PARALLAX curated chokepoint reference',
     url: 'https://github.com/ethan-goldstein/parallax',
-    license: 'Authored for this project — CC0',
-    spdx: 'CC0-1.0',
-    attribution: 'PARALLAX curated dataset',
-    shareAlike: false,
+    // Two things with two licences. The SELECTION — which ports and which
+    // chokepoints are worth drawing — is authored here. The COORDINATES are
+    // resolved from OpenStreetMap and each carries the OSM element id, so ODbL
+    // applies and share-alike is real. Claiming CC0 over the whole thing would
+    // be claiming a licence over somebody else's data.
+    license: 'Selection authored here (CC0); coordinates from OpenStreetMap (ODbL)',
+    spdx: 'CC0-1.0 AND ODbL-1.0',
+    attribution: 'PARALLAX curated selection; coordinates © OpenStreetMap contributors (ODbL)',
+    shareAlike: true,
     nonCommercial: false,
     typicalMs: 20,
   },

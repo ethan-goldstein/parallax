@@ -605,14 +605,21 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix,
   preq.has_spatial_bound = pr.query.within.present || pr.query.bbox.present;
   preq.spatial_extent_m = pr.query.within.present ? pr.query.within.distance_m : 0.0;
 
-  // A filter comparing an identifier for equality is narrowing by identity
+  // A filter comparing an IDENTIFYING attribute for equality narrows by identity
   // rather than by region — the distinction R1 turns on.
+  //
+  // The field is resolved through the symbol table and the answer comes from
+  // what the source DECLARED, not from the field's spelling. The previous
+  // version compared against a hardcoded list of four names that no source in
+  // this project uses, so the rule was reachable only by naming a field that
+  // does not exist — it could not fire on real data at all.
   if (pr.query.filter_root != ql::kNoNode) {
     for (const ql::Node& n : pr.query.nodes) {
       if (n.kind != ql::NodeKind::Compare) continue;
       if (n.op != ql::CmpOp::Eq) continue;
       const std::string& field = pr.query.str(pr.query.nodes[n.lhs].str);
-      if (field == "mmsi" || field == "id" || field == "callsign" || field == "imo") {
+      const SymbolId attr = store_.symbols().find(field);
+      if (attr.valid() && policy_.is_identifying(attr)) {
         preq.has_identity_predicate = true;
       }
     }

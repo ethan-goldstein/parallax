@@ -284,3 +284,75 @@ TEST_CASE("audit_json is well-formed even with no entries") {
   CHECK(audit.back() == '}');
   CHECK(audit.find("entries") != std::string::npos);
 }
+
+namespace {
+
+/// Writes wire::Fact records the way TypeScript does — through raw bytes at the
+/// staging address — so these exercise the real ingest path.
+u32 stage_facts(Session& s, const std::vector<wire::Fact>& facts) {
+  const u32 bytes = static_cast<u32>(facts.size() * sizeof(wire::Fact));
+  std::memcpy(s.staging_buffer(bytes), facts.data(), bytes);
+  return bytes;
+}
+
+wire::Fact geo(u32 entity, u32 attr, f64 lat, f64 lon) {
+  const Value v = Value::geo(GeoPoint::from_degrees(lat, lon));
+  return wire::Fact{v.bits,  entity, attr, 0, kOpenValid,
+                    0,       static_cast<u8>(v.kind), 0};
+}
+
+}  // namespace
+
+// ── R1 fires on DECLARED identity, not on a field's spelling ────────────────
+//
+// The rule used to compare the query's field name against four hardcoded
+// strings — mmsi, id, callsign, imo — and no source in this project declares any
+// of them. So R1 was reachable only by naming a field that does not exist, and
+// could not fire on real data at all. These pin the replacement.
+
+TEST_CASE("R1 fires on an attribute the source declared as identifying") {
+  Session s;
+  const SymbolId pos = s.intern("aircraft_position");
+  const SymbolId label = s.intern("aircraft_label");
+  s.register_source("aircraft", pos, SymbolId{});
+
+  s.set_sensitivity(pos, Sensitivity::Precise);
+  s.set_identifying(label, true);
+
+  // Enough aircraft that the population is not itself below k — the refusal has
+  // to come from the identity predicate, not from the estimate.
+  std::vector<wire::Fact> facts;
+  for (u32 i = 1; i <= 40; ++i) {
+    facts.push_back(geo(i, pos.v, 10.0 + static_cast<f64>(i) * 0.1, 20.0));
+  }
+  s.ingest(0, stage_facts(s, facts), 1000);
+  s.finish_ingest();
+
+  const auto denied = s.run_query("aircraft where aircraft_label = \"RCH123\"", 0);
+  CHECK(denied.denied);
+  CHECK(denied.rule_id == "R1-individual-narrowing");
+
+  // The same shape on a NON-identifying attribute is an ordinary query.
+  const auto allowed = s.run_query("aircraft where altitude = 30000", 0);
+  CHECK(!allowed.denied);
+}
+
+TEST_CASE("a field name that merely looks identifying is not") {
+  Session s;
+  const SymbolId pos = s.intern("aircraft_position");
+  s.register_source("aircraft", pos, SymbolId{});
+  s.set_sensitivity(pos, Sensitivity::Precise);
+
+  std::vector<wire::Fact> facts;
+  for (u32 i = 1; i <= 40; ++i) {
+    facts.push_back(geo(i, pos.v, 10.0 + static_cast<f64>(i) * 0.1, 20.0));
+  }
+  s.ingest(0, stage_facts(s, facts), 1000);
+  s.finish_ingest();
+
+  // `callsign` was one of the four hardcoded names. Nothing declares it, so it
+  // resolves to no attribute and must NOT trigger the rule — the old behaviour
+  // refused this while refusing nothing that could actually be asked.
+  const auto out = s.run_query("aircraft where callsign = \"RCH123\"", 0);
+  CHECK(!out.denied);
+}

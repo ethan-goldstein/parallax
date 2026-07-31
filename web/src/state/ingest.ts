@@ -60,10 +60,16 @@ export function registerAttributes(
   extra: readonly AttrDecl[] = [],
 ): AttrIds {
   const sensitivity = new Map<string, Sensitivity>()
+  // Identity is ORed rather than maxed: if any source says a field identifies,
+  // it identifies. The asymmetry is deliberate and matches the sensitivity rule
+  // above — both resolve conflicts toward the more restrictive answer.
+  const identifying = new Set<string>()
+
   const declarations = [...specs.flatMap((s) => s.attributes), ...extra]
   for (const decl of declarations) {
     const prev = sensitivity.get(decl.name) ?? Sensitivity.Public
     sensitivity.set(decl.name, decl.sensitivity > prev ? decl.sensitivity : prev)
+    if (decl.identifying) identifying.add(decl.name)
   }
 
   const attrs: Record<string, number> = {}
@@ -71,6 +77,7 @@ export function registerAttributes(
     const id = engine.intern(name)
     attrs[name] = id
     engine.setSensitivity(id, level)
+    if (identifying.has(name)) engine.setIdentifying(id, true)
   }
   return attrs
 }
@@ -99,10 +106,50 @@ export function registerQueryNames(engine: Engine, attrs: AttrIds): void {
 
 export interface CycleOptions {
   signal?: AbortSignal
+  /**
+   * Give up on any single source after this many milliseconds.
+   *
+   * `allSettled` waits for the slowest, so without a cap one sluggish endpoint
+   * holds the whole cycle — and at boot, the whole MAP — hostage. Measured on the
+   * deployed site: every feed but one finished inside 2.2s and GDACS took 35.2s,
+   * so first paint was thirty-seven seconds of empty globe.
+   *
+   * A timed-out source is reported as a failed feed and picked up by the next
+   * poll. It is not dropped, and it is not hidden.
+   */
+  timeoutMs?: number
   /** Only fetch these. Defaults to every registered source. */
   only?: readonly SourceSpec[]
   /** Required by viewport-scoped sources; they are skipped without it. */
   view?: Viewport
+}
+
+/**
+ * Rejects if the underlying promise has not settled in time.
+ *
+ * The fetch itself is NOT aborted: sources share the caller's AbortSignal, and
+ * aborting one on a timeout would cancel every other request riding the same
+ * signal. The slow response is simply no longer waited on, and is superseded by
+ * the next poll.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number | undefined, key: string): Promise<T> {
+  if (ms === undefined) return p
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`no response in ${(ms / 1000).toFixed(0)}s`)),
+      ms,
+    )
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e: unknown) => {
+        clearTimeout(timer)
+        reject(e instanceof Error ? e : new Error(`${key}: ${String(e)}`))
+      },
+    )
+  })
 }
 
 export class Ingestor {
@@ -182,7 +229,11 @@ export class Ingestor {
     let batches: Batch[] = []
 
     // allSettled, not all: one dead feed must degrade the map, not blank it.
-    const settled = await Promise.allSettled(specs.map((spec) => spec.fetch(signal, view)))
+    // The timeout is the same principle one level down — one SLOW feed must not
+    // hold the others, which `allSettled` alone still allows.
+    const settled = await Promise.allSettled(
+      specs.map((spec) => withTimeout(spec.fetch(signal, view), opts.timeoutMs, spec.key)),
+    )
 
     for (let i = 0; i < specs.length; i++) {
       const spec = specs[i]!

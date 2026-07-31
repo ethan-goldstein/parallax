@@ -18,6 +18,8 @@
  * some later moment, and this way it is one failure at startup.
  */
 export interface Shell {
+  /** The element the shell was built into. Overlays mount here. */
+  root: HTMLElement
   stage: HTMLElement
   status: HTMLElement
   tabrail: HTMLElement
@@ -25,6 +27,7 @@ export interface Shell {
   readout: HTMLElement
   inspector: HTMLElement
   tooltip: HTMLElement
+  tourStart: HTMLButtonElement
   scrubberHost: HTMLElement
   engineTag: HTMLElement
   purpose: HTMLSelectElement
@@ -47,6 +50,9 @@ const TEMPLATE = `
           <option value="disaster-response">disaster response</option>
         </select>
       </label>
+      <button type="button" id="tour-start" class="tour-start" hidden>
+        <span class="tour-start-dot"></span>show me
+      </button>
       <div id="status" class="status hud-label">booting engine…</div>
     </div>
   </header>
@@ -89,6 +95,7 @@ export function buildShell(app: HTMLElement): Shell {
   }
 
   return {
+    root: app,
     stage: pick('#stage'),
     status: pick('#status'),
     tabrail: pick('#tabrail'),
@@ -96,6 +103,7 @@ export function buildShell(app: HTMLElement): Shell {
     readout: pick('#readout'),
     inspector: pick('#inspector'),
     tooltip: pick('#tooltip'),
+    tourStart: pick<HTMLButtonElement>('#tour-start'),
     scrubberHost: pick('#scrubber-host'),
     engineTag: pick('#engine-tag'),
     purpose: pick<HTMLSelectElement>('#purpose'),

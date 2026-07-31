@@ -36,6 +36,7 @@ import { buildReconBatch, ReconPanel } from './ui/recon'
 import { buildAtlas } from './render/icons'
 import { buildShell } from './ui/shell'
 import { TabRail, type TabDef } from './ui/tabs'
+import { Tour } from './ui/tour'
 
 const MAX_POINTS = 262_144
 
@@ -101,10 +102,23 @@ async function main(): Promise<void> {
   globe.start()
 
   // ── fetch every registered feed concurrently ─────────────────────────────
+  //
+  // Six seconds, not unlimited. Measured on the deployed site, first paint took
+  // 36.9s because GDACS took 35.2s and `allSettled` waits for the slowest —
+  // every other feed was in under 2.2s. Thirty-seven seconds of empty globe is
+  // most of the audience gone before anything is on screen.
+  //
+  // A source that misses the cap is not dropped: it is reported as a failed feed
+  // in the panel, and the scheduler picks it up on its normal interval a few
+  // seconds later, at which point its data appears. Slow is degraded, not fatal.
+  const BOOT_TIMEOUT_MS = 6000
+
   statusEl.textContent = 'fetching feeds…'
   const registry = new EntityRegistry()
   const ingestor = new Ingestor(engine, registry, attrs)
-  let { feeds, validMin, validMax, ingestMs, batches, clamped } = await ingestor.cycle()
+  let { feeds, validMin, validMax, ingestMs, batches, clamped } = await ingestor.cycle({
+    timeoutMs: BOOT_TIMEOUT_MS,
+  })
 
   if (batches === 0) {
     fail('Every feed failed. Nothing to display.')
@@ -923,6 +937,106 @@ async function main(): Promise<void> {
     runBenchmark(engine, benchHost)
   })
 
+  // ── deep links ───────────────────────────────────────────────────────────
+  //
+  // `?tab=query&q=…` opens a specific panel with a specific question already
+  // asked. The point is being able to SEND someone the policy refusal rather
+  // than describing it — a link that lands on the thing under discussion is
+  // worth more than a paragraph explaining where to click.
+  //
+  // Read once at boot and never written back on every interaction: a URL that
+  // rewrites itself as you drag would fight the back button and fill history
+  // with states nobody chose to save.
+  function applyDeepLink(): void {
+    const params = new URLSearchParams(location.search)
+
+    const tab = params.get('tab')
+    if (tab && TABS.some((t) => t.id === tab)) tabs.open(tab)
+
+    const q = params.get('q')
+    if (q) {
+      tabs.open('query')
+      queryInput.value = q
+      // The text console is opened, not left closed: the builder above it still
+      // reads whatever it was last set to, so a closed console leaves the panel
+      // displaying one query while the plan below reports another. Showing the
+      // text that actually ran is the only honest arrangement.
+      consoleEl.open = true
+      runQuery()
+    }
+
+    // `?tour=1` forces the tour even for a returning visitor, which is what
+    // makes it usable as the link you actually send someone.
+    if (params.get('tour') === '1') setTimeout(startTour, 600)
+  }
+
+  /** The current view as a shareable URL. */
+  function shareLink(): string {
+    const params = new URLSearchParams()
+    if (tabs.active) params.set('tab', tabs.active)
+    if (app.state.query.submitted && app.state.query.text) {
+      params.set('q', app.state.query.text)
+    }
+    const qs = params.toString()
+    return `${location.origin}${location.pathname}${qs ? `?${qs}` : ''}`
+  }
+
+  // ── the guided tour ──────────────────────────────────────────────────────
+  //
+  // Offered rather than forced. It autostarts once per browser, because the
+  // whole point is the visitor who does not yet know there is anything to
+  // discover — and never again, because a tour you have already seen taking over
+  // the page is an obstacle.
+  const TOUR_SEEN = 'parallax.tourSeen'
+  let tour: Tour | null = null
+
+  function startTour(): void {
+    tour?.stop()
+    shell.tourStart.disabled = true
+    tour = new Tour({
+      // `shell.root`, not `app` — inside main() that name is the state Store,
+      // which shadows the module-scope root element.
+      host: shell.root,
+      context: {
+        engine,
+        globe,
+        app,
+        scrubber,
+        openTab: (id) => tabs.open(id),
+        runQuery: (sql) => {
+          queryInput.value = sql
+          runQuery()
+        },
+        clearQuery: () => {
+          queryInput.value = ''
+          clearQuery()
+        },
+      },
+      onEnd: () => {
+        shell.tourStart.disabled = false
+        tour = null
+      },
+    })
+    void tour.run()
+  }
+
+  shell.tourStart.hidden = false
+  shell.tourStart.addEventListener('click', startTour)
+
+  applyDeepLink()
+
+  try {
+    if (localStorage.getItem(TOUR_SEEN) === null) {
+      localStorage.setItem(TOUR_SEEN, '1')
+      // A beat after LIVE, so the globe has drawn something before it is
+      // narrated. Explaining an empty map is worse than not explaining one.
+      setTimeout(startTour, 1200)
+    }
+  } catch {
+    // Private browsing throws on localStorage. The button still works; only the
+    // once-per-browser autostart is lost, which is the right thing to lose.
+  }
+
   Object.assign(window, {
     __parallax: {
       engine,
@@ -942,6 +1056,8 @@ async function main(): Promise<void> {
       // The glyph sheet, so the marks can be inspected at size without
       // screenshotting the map and guessing.
       atlas: buildAtlas,
+      startTour,
+      shareLink,
     },
   })
 }

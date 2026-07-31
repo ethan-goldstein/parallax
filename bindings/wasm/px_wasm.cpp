@@ -201,6 +201,12 @@ void set_sensitivity(u32 attr, u32 level) {
   session().set_sensitivity(px::SymbolId{attr}, s);
 }
 
+/// Declares that equality on this attribute picks out one asset — what R1 turns
+/// on. Threaded from the source's own declaration, not guessed from the name.
+void set_identifying(u32 attr, bool identifying) {
+  session().set_identifying(px::SymbolId{attr}, identifying);
+}
+
 std::string audit_log(u32 limit) {
   return session().audit_json(limit);
 }
@@ -419,6 +425,7 @@ EMSCRIPTEN_BINDINGS(parallax) {
   emscripten::function("benchScan", &bench_scan);
   emscripten::function("setPurpose", &set_purpose);
   emscripten::function("setSensitivity", &set_sensitivity);
+  emscripten::function("setIdentifying", &set_identifying);
   emscripten::function("auditLog", &audit_log);
   emscripten::function("finishIngest", &finish_ingest);
   emscripten::function("resolveEntities", &resolve_entities);

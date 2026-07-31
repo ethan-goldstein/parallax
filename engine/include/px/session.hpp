@@ -171,6 +171,13 @@ class Session {
   /// system carries sensitivity" and "I added a check".
   void set_sensitivity(SymbolId attr, Sensitivity s) { policy_.set_sensitivity(attr, s); }
 
+  /// Declares that equality on this attribute narrows to a single asset, which
+  /// is the distinction R1 turns on. Threaded from the source's own declaration
+  /// rather than inferred from the field's name.
+  void set_identifying(SymbolId attr, bool identifying) {
+    policy_.set_identifying(attr, identifying);
+  }
+
   /// The audit trail, as JSON. Read back OUT of the bitemporal store, not from
   /// a side list — so what is displayed is what was actually recorded.
   [[nodiscard]] std::string audit_json(u32 limit = 50) const;

@@ -99,6 +99,7 @@ interface EngineExports {
   ): QueryResult
   setPurpose(name: string): boolean
   setSensitivity(attr: number, level: number): void
+  setIdentifying(attr: number, identifying: boolean): void
   auditLog(limit: number): string
   finishIngest(): void
   resolveEntities(geoAttr: number, scalarAttr: number): ErStats
@@ -257,6 +258,17 @@ export class Engine {
   /** 0 = public, 1 = precise, 2 = person-linked. */
   setSensitivity(attr: number, level: 0 | 1 | 2): void {
     this.#x.setSensitivity(attr, level)
+  }
+
+  /**
+   * Declares that equality on this attribute narrows to one asset.
+   *
+   * This is what R1 checks. Before it existed the rule compared the query's
+   * field name against four hardcoded strings that matched nothing this project
+   * ingests, so the flagship privacy refusal could not fire on real data.
+   */
+  setIdentifying(attr: number, identifying: boolean): void {
+    this.#x.setIdentifying(attr, identifying)
   }
 
   /** The audit trail, read back out of the bitemporal store. */
