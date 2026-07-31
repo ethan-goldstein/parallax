@@ -46,6 +46,19 @@ export const SOURCES: Record<string, SourceMeta> = {
     typicalMs: 400,
   },
 
+  emsc: {
+    id: 3,
+    key: 'emsc',
+    name: 'EMSC — European-Mediterranean Seismological Centre',
+    url: 'https://www.seismicportal.eu/',
+    license: 'Open data, attribution requested',
+    spdx: 'NOASSERTION',
+    attribution: 'European-Mediterranean Seismological Centre (EMSC)',
+    shareAlike: false,
+    nonCommercial: false,
+    typicalMs: 1800,
+  },
+
   digitraffic: {
     id: 1,
     key: 'digitraffic',

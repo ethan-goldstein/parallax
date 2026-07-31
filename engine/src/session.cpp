@@ -86,10 +86,22 @@ IngestResult Session::ingest(u32 byte_offset, u32 byte_len, i64 wall_clock_unix)
   }
 
   store_.commit_txn();
+
+  // Indexes are NOT rebuilt here. Rebuilding per batch is O(batches x facts):
+  // with 2,841 transactions over 11,811 facts that measured 9.7 SECONDS of
+  // ingest, because each of 2,841 batches re-scanned and re-sorted everything.
+  // The caller rebuilds once, after the last batch, via finish_ingest().
+  //
+  // Correctness does not depend on remembering: as_of_entity falls back to a
+  // scan while the entity index is stale, and the planner simply will not
+  // consider GeoRangeScan while the spatial index is unbuilt. A forgotten
+  // rebuild is a performance bug, never a wrong answer.
+  return result;
+}
+
+void Session::finish_ingest() {
   store_.rebuild_entity_index();
   rebuild_geo_index();
-
-  return result;
 }
 
 void Session::rebuild_geo_index() {
@@ -107,6 +119,140 @@ void Session::rebuild_geo_index() {
     geo_.add(v.as_geo(), i);
   }
   geo_.build();
+}
+
+er::ErStats Session::resolve_entities(SymbolId geo_attr, SymbolId scalar_attr) {
+  const Timestamp valid_at = kTimeMax - 1;  // "everything that has happened"
+  const u32 sys_at = store_.current_txn().v;
+
+  // Build one record per entity from what is ACTUALLY IN THE STORE, rather
+  // than from the feed clients. Resolving a parallel copy would let the two
+  // drift, and it would also lose the SourceId — which the model needs, since
+  // same-source pairs are never merged.
+  scratch_.clear();
+  store_.as_of(valid_at, TxnId{sys_at}, scratch_);
+
+  std::vector<er::Record> records;
+  record_entity_.clear();
+  std::vector<u32> slot;  // entity index -> record index
+
+  for (const FactId f : scratch_) {
+    if (store_.fact_attr(f) != geo_attr) continue;
+    const Value v = store_.fact_value(f);
+    if (v.kind != Kind::Geo) continue;
+
+    const EntityId e = store_.fact_entity(f);
+    if (e.index() >= slot.size()) slot.resize(e.index() + 1, 0xFFFF'FFFFu);
+    if (slot[e.index()] != 0xFFFF'FFFFu) continue;  // first position wins
+
+    er::Record r;
+    r.id = static_cast<u32>(records.size());
+    r.source = static_cast<u16>(store_.fact_source(f).v);
+    r.position = v.as_geo();
+    // Valid-from IS the event's origin time — the instant the fact became
+    // true — so the temporal comparator reads it straight off the store rather
+    // than needing a separate attribute.
+    r.time = store_.fact_valid_from(f);
+
+    slot[e.index()] = r.id;
+    record_entity_.push_back(e.v);
+    records.push_back(r);
+  }
+
+  // Second pass for the scalar, now that record indices exist.
+  if (scalar_attr.valid()) {
+    for (const FactId f : scratch_) {
+      if (store_.fact_attr(f) != scalar_attr) continue;
+      const EntityId e = store_.fact_entity(f);
+      if (e.index() >= slot.size() || slot[e.index()] == 0xFFFF'FFFFu) continue;
+
+      const Value v = store_.fact_value(f);
+      er::Record& r = records[slot[e.index()]];
+      if (v.kind == Kind::F64) {
+        r.magnitude = v.as_f64();
+        r.has_magnitude = true;
+      } else if (v.kind == Kind::I64) {
+        r.magnitude = static_cast<f64>(v.as_i64());
+        r.has_magnitude = true;
+      }
+    }
+  }
+
+  resolution_ = er::resolve(records, er::ErConfig{}, &store_.symbols());
+  return resolution_.stats;
+}
+
+void Session::unmerge_pair(u32 pair_index) {
+  er::unmerge(resolution_, pair_index);
+}
+
+namespace {
+
+void json_str(std::string& out, const std::string& v) {
+  out += '"';
+  for (const char c : v) {
+    if (c == '"') out += "\\\"";
+    else if (c == '\\') out += "\\\\";
+    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
+    else out += c;
+  }
+  out += '"';
+}
+
+void json_num(std::string& out, f64 v) {
+  char buf[48];
+  std::snprintf(buf, sizeof(buf), "%.4g", v);
+  out += buf;
+}
+
+}  // namespace
+
+std::string Session::merge_evidence_json(u32 limit) const {
+  std::string s;
+  s.reserve(4096);
+  s += "{\"stats\":{";
+  s += "\"records\":" + std::to_string(resolution_.stats.records);
+  s += ",\"pairsCompared\":" + std::to_string(resolution_.stats.pairs_compared);
+  s += ",\"pairsAccepted\":" + std::to_string(resolution_.stats.pairs_accepted);
+  s += ",\"clusters\":" + std::to_string(resolution_.stats.clusters);
+  s += ",\"mergedRecords\":" + std::to_string(resolution_.stats.merged_records);
+  s += ",\"blocks\":" + std::to_string(resolution_.stats.blocks);
+  s += ",\"blocksSkipped\":" + std::to_string(resolution_.stats.blocks_skipped);
+  s += ",\"elapsedMs\":";
+  json_num(s, resolution_.stats.elapsed_ms);
+  s += "},\"merges\":[";
+
+  u32 emitted = 0;
+  for (usize i = 0; i < resolution_.accepted.size() && emitted < limit; ++i) {
+    const er::Pair& p = resolution_.accepted[i];
+    if (emitted) s += ',';
+    s += "{\"pairIndex\":" + std::to_string(i);
+    s += ",\"a\":" + std::to_string(p.a);
+    s += ",\"b\":" + std::to_string(p.b);
+    s += ",\"score\":";
+    json_num(s, p.score);
+    s += ",\"evidence\":[";
+    for (usize k = 0; k < p.evidence.size(); ++k) {
+      const er::MatchEvidence& e = p.evidence[k];
+      if (k) s += ',';
+      s += "{\"field\":";
+      json_str(s, er::comparator_name(e.comparator));
+      s += ",\"a\":";
+      json_str(s, e.a_value);
+      s += ",\"b\":";
+      json_str(s, e.b_value);
+      s += ",\"contribution\":";
+      json_num(s, e.contribution);
+      s += ",\"agreed\":";
+      s += e.agreed ? "true" : "false";
+      s += '}';
+    }
+    s += "]}";
+    ++emitted;
+  }
+
+  s += "]}";
+  return s;
 }
 
 void Session::register_source(std::string_view name, SymbolId geo_attr,

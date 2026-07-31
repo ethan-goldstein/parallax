@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "px/prelude.hpp"
+#include "px/er.hpp"
 #include "px/geo.hpp"
 #include "px/ql/plan.hpp"
 #include "px/store.hpp"
@@ -119,10 +120,35 @@ class Session {
   /// Parses, plans, executes, and packs the result for rendering.
   QueryOutcome run_query(std::string_view sql, i64 now_unix);
 
+  /// Rebuilds every index after a run of ingest() calls.
+  ///
+  /// Call ONCE after the last batch, never per batch. Both index rebuilds are
+  /// O(n) over the whole store, so doing them per batch is quadratic in the
+  /// batch count — which measured 9.7 s across 2,841 transactions before this
+  /// was split out.
+  void finish_ingest();
+
   /// Rebuilds the spatial index over every geo-valued fact. Called after a
   /// bulk ingest; queries fall back to a scan while it is stale, so a
   /// forgotten rebuild is a performance bug rather than a wrong answer.
   void rebuild_geo_index();
+
+  // ── entity resolution ────────────────────────────────────────────────────
+
+  /// Runs resolution over every entity carrying `geo_attr`, at the latest
+  /// (valid, system) point.
+  ///
+  /// Records are built from the store rather than from the feed clients, so
+  /// resolution operates on what was actually ingested — including its
+  /// provenance — rather than on a parallel copy that could drift.
+  er::ErStats resolve_entities(SymbolId geo_attr, SymbolId scalar_attr);
+
+  /// Merge evidence for the clusters that actually merged, as JSON.
+  /// `limit` caps how many clusters are described.
+  [[nodiscard]] std::string merge_evidence_json(u32 limit = 25) const;
+
+  /// Undoes one accepted merge and recomputes the affected clustering.
+  void unmerge_pair(u32 pair_index);
 
   [[nodiscard]] const ScanStats& last_scan() const noexcept { return last_scan_; }
   [[nodiscard]] f64 last_query_ms() const noexcept { return last_query_ms_; }
@@ -159,6 +185,11 @@ class Session {
   u32 query_stamp_ = 0;
 
   GeoIndex geo_;
+
+  er::Resolution resolution_;
+  /// Resolution works on dense record indices; this maps them back to the
+  /// EntityIds the rest of the engine uses.
+  std::vector<u32> record_entity_;
 
   struct SourceBinding {
     std::string name;

@@ -9,7 +9,9 @@
 
 add_library(px_core STATIC
   src/arena.cpp
+  src/er.cpp
   src/geo.cpp
+  src/graph.cpp
   src/ql/lexer.cpp
   src/ql/parser.cpp
   src/ql/plan.cpp

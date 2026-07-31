@@ -463,3 +463,174 @@
     display: none;
   }
 }
+
+/* ── merge evidence ──────────────────────────────────────────────────────── */
+
+.evidence {
+  position: fixed;
+  left: var(--s-6);
+  bottom: 190px;
+  width: 25rem;
+  max-height: 46vh;
+  overflow-y: auto;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.evidence:empty {
+  display: none;
+}
+
+.ev-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.ev-headline {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--valid-time);
+}
+
+.ev-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+/* Amber, not red: a skipped block is a disclosed limitation, not an error. */
+.ev-stats .warn {
+  color: var(--accent);
+}
+
+.ev-empty {
+  padding: var(--s-3);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+.ev-merge {
+  border-bottom: 1px solid var(--rule);
+}
+
+.ev-merge summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-dim);
+}
+
+.ev-merge summary:hover {
+  color: var(--ink);
+}
+
+.ev-merge[open] summary {
+  color: var(--ink);
+}
+
+.ev-pair em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.ev-score {
+  color: var(--valid-time);
+}
+
+.ev-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 5rem 3rem;
+  gap: var(--s-2);
+  align-items: center;
+  padding: 3px var(--s-3);
+  font-size: var(--fs-micro);
+}
+
+.ev-field {
+  font-family: var(--font-mono);
+  color: var(--ink-dim);
+}
+
+.ev-vals {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-vals em {
+  font-style: normal;
+  color: var(--ink-faint);
+}
+
+/* Signed bar: support extends right of centre, opposition left. An unsigned
+   magnitude would hide which way a field voted — the thing being explained. */
+.ev-bar {
+  position: relative;
+  display: block;
+  height: 6px;
+  background: var(--rule);
+}
+
+.ev-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.ev-bar-fill.pos {
+  background: var(--valid-time);
+}
+
+.ev-bar-fill.neg {
+  background: var(--deny);
+}
+
+.ev-contrib {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink-dim);
+}
+
+.ev-row.disagree .ev-contrib {
+  color: var(--deny);
+}
+
+.ev-total {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--valid-time);
+}
+
+/* Hidden only when it would genuinely overlap the layer panel. The earlier
+   1400px breakpoint hid it on ordinary laptop widths, so the flagship panel of
+   this phase was invisible on most screens. */
+@media (max-width: 1180px) {
+  .evidence {
+    display: none;
+  }
+}

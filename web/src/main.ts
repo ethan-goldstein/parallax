@@ -9,8 +9,10 @@ import { bootEngine, EngineBootError } from './engine/boot'
 import { Engine } from './engine/engine'
 import { Globe } from './render/globe'
 import { fetchVessels, buildVesselBatches } from './sources/digitraffic'
+import { fetchEmsc, buildEmscBatches } from './sources/emsc'
 import { licenseObligations, SOURCES } from './sources/registry'
 import { buildBatches, EntityRegistry, fetchQuakes, USGS_FEEDS, type Batch } from './sources/usgs'
+import { renderEvidence, type MergeEvidence } from './ui/evidence'
 import { renderExplain, type ExplainPlan } from './ui/explain'
 import { Scrubber } from './ui/scrubber'
 
@@ -38,6 +40,7 @@ app.innerHTML = `
   </div>
 
   <section id="explain" class="explain"></section>
+  <section id="evidence" class="evidence"></section>
 
   <aside class="hud panel layers" id="layers"></aside>
   <aside id="readout" class="hud panel readout" aria-live="polite"></aside>
@@ -96,6 +99,7 @@ async function main(): Promise<void> {
     depth: engine.intern('depth'),
     vesselPosition: engine.intern('vessel_position'),
     speed: engine.intern('speed'),
+    region: engine.intern('region'),
   }
 
   // Bind query-language source names to the attributes that carry their
@@ -137,9 +141,10 @@ async function main(): Promise<void> {
   let validMax = Number.NEGATIVE_INFINITY
 
   // allSettled, not all: one dead feed must degrade the map, not blank it.
-  const [quakeRes, vesselRes] = await Promise.allSettled([
+  const [quakeRes, vesselRes, emscRes] = await Promise.allSettled([
     fetchQuakes(USGS_FEEDS.week),
     fetchVessels(),
+    fetchEmsc(),
   ])
 
   if (quakeRes.status === 'fulfilled' && quakeRes.value.quakes.length > 0) {
@@ -183,6 +188,36 @@ async function main(): Promise<void> {
     })
   }
 
+  // EMSC shares the `position` attribute with USGS DELIBERATELY. Both agencies
+  // describe earthquakes, so they belong to the same object type — and putting
+  // them in one attribute is what creates the entity-resolution problem rather
+  // than hiding it behind separate namespaces.
+  if (emscRes.status === 'fulfilled' && emscRes.value.events.length > 0) {
+    const e = emscRes.value.events
+    allBatches = allBatches.concat(
+      buildEmscBatches(e, registry, {
+        position: attrs.position,
+        magnitude: attrs.magnitude,
+        depth: attrs.depth,
+        region: attrs.region,
+      }),
+    )
+    for (const x of e) {
+      const t = toTimestamp(x.timeUnix)
+      if (t < validMin) validMin = t
+      if (t > validMax) validMax = t
+    }
+    feeds.push({ key: 'emsc', label: 'seismic · emsc', layer: 'seismic', count: e.length })
+  } else {
+    feeds.push({
+      key: 'emsc',
+      label: 'seismic · emsc',
+      layer: 'seismic',
+      count: 0,
+      error: emscRes.status === 'rejected' ? String(emscRes.reason).slice(0, 60) : 'no events',
+    })
+  }
+
   if (allBatches.length === 0) {
     fail('Every feed failed. Nothing to display.')
     return
@@ -202,10 +237,26 @@ async function main(): Promise<void> {
 
   const t0 = performance.now()
   for (const batch of allBatches) engine.ingest(batch.facts, batch.wallClockUnix)
+  // Once, after the last batch — see Engine.finishIngest.
+  engine.finishIngest()
   const ingestMs = performance.now() - t0
 
   statusEl.textContent = 'LIVE'
   statusEl.classList.add('ok')
+
+  // ── entity resolution ────────────────────────────────────────────────────
+  //
+  // USGS and EMSC independently locate the same earthquakes with different
+  // coordinates, magnitudes, and ids, and nothing joins them. This is a real
+  // duplicate problem, not a demonstrated one.
+  engine.resolveEntities(attrs.position, attrs.magnitude)
+  let evidence: MergeEvidence | null = null
+  try {
+    evidence = JSON.parse(engine.mergeEvidence(30)) as MergeEvidence
+  } catch (err) {
+    console.error('[parallax] merge evidence was not valid JSON', err)
+  }
+  renderEvidence(document.querySelector<HTMLElement>('#evidence')!, evidence)
 
   // ── attribution ──────────────────────────────────────────────────────────
   const liveIds = feeds.filter((f) => f.count > 0).map((f) => SOURCES[f.key]!.id)

@@ -133,6 +133,37 @@ JsQueryResult run_query(const std::string& sql, double now_unix) {
   return out;
 }
 
+// ── entity resolution ──────────────────────────────────────────────────────
+
+struct JsErStats {
+  u32 records = 0;
+  u32 pairsCompared = 0;
+  u32 pairsAccepted = 0;
+  u32 clusters = 0;
+  u32 mergedRecords = 0;
+  u32 blocksSkipped = 0;
+  double elapsedMs = 0.0;
+};
+
+JsErStats resolve_entities(u32 geo_attr, u32 scalar_attr) {
+  const px::er::ErStats s =
+      session().resolve_entities(px::SymbolId{geo_attr}, px::SymbolId{scalar_attr});
+  return JsErStats{s.records,        s.pairs_compared, s.pairs_accepted, s.clusters,
+                   s.merged_records, s.blocks_skipped, s.elapsed_ms};
+}
+
+void finish_ingest() {
+  session().finish_ingest();
+}
+
+std::string merge_evidence(u32 limit) {
+  return session().merge_evidence_json(limit);
+}
+
+void unmerge_pair(u32 pair_index) {
+  session().unmerge_pair(pair_index);
+}
+
 JsScanStats last_scan() {
   const px::ScanStats& s = session().last_scan();
   return JsScanStats{s.chunks_total, s.chunks_skipped, s.rows_scanned, s.rows_matched,
@@ -203,6 +234,20 @@ EMSCRIPTEN_BINDINGS(parallax) {
       .field("errorBegin", &JsQueryResult::errorBegin)
       .field("errorEnd", &JsQueryResult::errorEnd)
       .field("explain", &JsQueryResult::explain);
+
+  emscripten::value_object<JsErStats>("ErStats")
+      .field("records", &JsErStats::records)
+      .field("pairsCompared", &JsErStats::pairsCompared)
+      .field("pairsAccepted", &JsErStats::pairsAccepted)
+      .field("clusters", &JsErStats::clusters)
+      .field("mergedRecords", &JsErStats::mergedRecords)
+      .field("blocksSkipped", &JsErStats::blocksSkipped)
+      .field("elapsedMs", &JsErStats::elapsedMs);
+
+  emscripten::function("finishIngest", &finish_ingest);
+  emscripten::function("resolveEntities", &resolve_entities);
+  emscripten::function("mergeEvidence", &merge_evidence);
+  emscripten::function("unmergePair", &unmerge_pair);
 
   emscripten::function("registerSource", &register_source);
   emscripten::function("runQuery", &run_query);

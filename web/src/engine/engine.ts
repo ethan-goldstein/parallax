@@ -46,6 +46,16 @@ export interface QueryResult {
   explain: string
 }
 
+export interface ErStats {
+  records: number
+  pairsCompared: number
+  pairsAccepted: number
+  clusters: number
+  mergedRecords: number
+  blocksSkipped: number
+  elapsedMs: number
+}
+
 export interface Transaction {
   id: number
   wallClockUnix: number
@@ -72,6 +82,10 @@ interface EngineExports {
   txnFactCount(i: number): number
   registerSource(name: string, geoAttr: number, scalarAttr: number): void
   runQuery(sql: string, nowUnix: number): QueryResult
+  finishIngest(): void
+  resolveEntities(geoAttr: number, scalarAttr: number): ErStats
+  mergeEvidence(limit: number): string
+  unmergePair(pairIndex: number): void
 }
 
 export class Engine {
@@ -178,6 +192,37 @@ export class Engine {
    */
   runQuery(sql: string, nowUnix = Math.floor(Date.now() / 1000)): QueryResult {
     return this.#x.runQuery(sql, nowUnix)
+  }
+
+  /**
+   * Rebuilds every index. Call ONCE after the last ingest batch.
+   *
+   * Doing this per batch is quadratic in the batch count — it measured 9.7 s
+   * across 2,841 transactions. Correctness does not depend on calling it:
+   * stale indexes degrade to scans, never to wrong answers.
+   */
+  finishIngest(): void {
+    this.#x.finishIngest()
+  }
+
+  /**
+   * Runs entity resolution over everything carrying `geoAttr`.
+   *
+   * Records are rebuilt from the store rather than from the feed clients, so
+   * resolution sees exactly what was ingested — including each fact's source,
+   * which the model needs because same-source pairs are never merged.
+   */
+  resolveEntities(geoAttr: number, scalarAttr: number): ErStats {
+    return this.#x.resolveEntities(geoAttr, scalarAttr)
+  }
+
+  /** Per-merge evidence as JSON — the derivation, not a summary. */
+  mergeEvidence(limit = 25): string {
+    return this.#x.mergeEvidence(limit)
+  }
+
+  unmergePair(pairIndex: number): void {
+    this.#x.unmergePair(pairIndex)
   }
 
   /** Every transaction, for labelling the system-time axis. */

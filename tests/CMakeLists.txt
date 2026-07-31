@@ -32,6 +32,7 @@ target_include_directories(doctest SYSTEM INTERFACE "${doctest_header_SOURCE_DIR
 add_executable(px_tests
   main.cpp
   test_arena.cpp
+  test_er.cpp
   test_geo.cpp
   test_plan.cpp
   test_ql.cpp
