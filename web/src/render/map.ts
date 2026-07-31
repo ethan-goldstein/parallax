@@ -130,6 +130,25 @@ function haversineMetres(lat1: number, lon1: number, lat2: number, lon2: number)
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)))
 }
 
+/**
+ * Whether the stylesheet is parsed and `addLayer` will therefore work.
+ *
+ * Deliberately NOT `map.isStyleLoaded()`, which additionally requires every
+ * source to have loaded. A single dead tile source would make that false
+ * forever, and gating layer attachment on it would turn one bad source into a
+ * map with no data on it at all — the exact failure this check exists to
+ * prevent.
+ */
+function styleIsParsed(map: MlMap): boolean {
+  // getStyle() serialises the stylesheet and can throw before one exists, which
+  // would propagate out of an event handler and take the frame with it.
+  try {
+    return (map.getStyle()?.layers?.length ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 export interface GlobeOptions {
   container: HTMLElement
   maxPoints: number
@@ -300,8 +319,24 @@ export class Globe {
     // for the first full tile set, so on a slow network — or a throttled
     // background tab — it can be many seconds late or never fire at all, and the
     // data layers never get added to a map that is visibly working.
-    if (map.isStyleLoaded()) this.#onStyleLoaded()
-    else map.once('style.load', () => this.#onStyleLoaded())
+    //
+    // Three ways in, because a single `once('style.load')` is a RACE. This map is
+    // constructed from a style OBJECT, not a URL, so MapLibre has no network to
+    // wait for and can finish loading before this line runs — the listener then
+    // waits forever for an event that already fired, and the symptom is a black
+    // canvas whose frame counter looks perfectly healthy, because `render` fires
+    // whether or not a style is loaded.
+    //
+    // `isStyleLoaded()` alone cannot detect that: it also requires every source
+    // to be loaded, so it reads false immediately after construction even when
+    // the style itself is ready. Hence `styledata` as well, which fires
+    // repeatedly and catches the case the other two miss.
+    const attach = (): void => this.#onStyleLoaded()
+    if (styleIsParsed(map)) attach()
+    else {
+      map.once('style.load', attach)
+      map.on('styledata', attach)
+    }
 
     map.on('render', () => this.#tick())
     this.#bindPicking(map)
@@ -329,7 +364,9 @@ export class Globe {
    */
   #onStyleLoaded(): void {
     const map = this.#map
-    if (!map) return
+    // Idempotent: three separate paths can reach this, and only the first that
+    // finds a parsed stylesheet should do anything.
+    if (!map || this.#ready || !styleIsParsed(map)) return
 
     this.#firstSymbolId = map.getStyle().layers?.find((l) => l.type === 'symbol')?.id
     this.#ready = true
