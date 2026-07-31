@@ -88,6 +88,34 @@ const BOUNDARY_PAINT: Record<string, { color: string; opacity: number; boost: nu
 const BOUNDARY_OPACITY_OVER_IMAGERY = 0.9
 
 /**
+ * Scales a line-width expression by scaling its OUTPUT STOPS.
+ *
+ * The obvious version — `['*', <interpolate>, factor]` — is invalid, and
+ * invalid in a way that costs far more than it looks. The style spec requires
+ * `['zoom']` to be the direct input of a TOP-LEVEL `interpolate` or `step`;
+ * wrapping the interpolate in a multiply demotes it, MapLibre rejects the
+ * WHOLE STYLE, and the map then has no basemap and no data layers at all —
+ * while still firing `render`, so the frame counter looks perfectly healthy
+ * over a black canvas. One malformed paint property took down everything.
+ *
+ * Multiplying the stop outputs is equivalent and keeps `['zoom']` where the
+ * spec requires it.
+ */
+function scaleLineWidth(width: unknown, factor: number): unknown {
+  if (factor === 1) return width
+  if (typeof width === 'number') return width * factor
+  if (Array.isArray(width) && width[0] === 'interpolate') {
+    // ['interpolate', interpolation, input, in0, out0, in1, out1, ...]
+    const scaled = [...width]
+    for (let i = 4; i < scaled.length; i += 2) {
+      if (typeof scaled[i] === 'number') scaled[i] = (scaled[i] as number) * factor
+    }
+    return scaled
+  }
+  return width
+}
+
+/**
  * Land and water, made distinguishable.
  *
  * The `dark` style has NO land fill — land is literally the page background,
@@ -244,9 +272,8 @@ async function buildStyle(): Promise<StyleSpecification> {
     paint['line-opacity'] = want.opacity
     // Keep OpenMapTiles' width interpolation and scale it, rather than
     // replacing it with a constant that would be hairline at z2 and a slab at
-    // z18.
-    const width = paint['line-width']
-    paint['line-width'] = Array.isArray(width) ? ['*', width, want.boost] : (width ?? 1)
+    // z18. Scaled by its stops — see scaleLineWidth for why wrapping is fatal.
+    paint['line-width'] = scaleLineWidth(paint['line-width'] ?? 1, want.boost)
     // The default blur softens these into nothing at low zoom.
     paint['line-blur'] = 0
     layer.paint = paint as never
