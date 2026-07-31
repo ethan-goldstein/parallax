@@ -135,6 +135,7 @@ export class Ingestor {
         const { batches: b, count } = spec.normalize(res.value, {
           attrs: this.attrs,
           registry: this.registry,
+          intern: (text) => this.engine.intern(text),
         })
         if (count === 0) {
           feeds.push({ ...base, count: 0, error: 'no records' })

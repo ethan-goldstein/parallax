@@ -178,6 +178,27 @@ class Session {
   /// `limit` caps how many clusters are described.
   [[nodiscard]] std::string merge_evidence_json(u32 limit = 25) const;
 
+  /// Identifies the nearest visible point to a click and answers everything
+  /// knowable about it, as JSON.
+  ///
+  /// Picking runs through the Morton index rather than over the render buffer,
+  /// because the render buffer is ONE fixed allocation reused by every
+  /// query_points call — after a multi-layer refresh it holds only the last
+  /// layer's points, so a caller that retained a handle per layer would be
+  /// reading the wrong data and would never find out. The spatial index has no
+  /// such problem: it is keyed by FactId over every geo fact in the store.
+  ///
+  /// `geo_attrs_csv` is the set of geometry attributes the caller is currently
+  /// DISPLAYING, as decimal SymbolIds. The engine has no concept of a layer
+  /// being switched off, and should not acquire one — visibility is a property
+  /// of the view, so the view states it.
+  ///
+  /// Every symbol is resolved to text here rather than exposing the symbol
+  /// table across the boundary: the same reasoning as audit_json and
+  /// merge_evidence_json, which also hand back finished strings.
+  [[nodiscard]] std::string inspect_json(f64 lat, f64 lon, f64 radius_m, Timestamp valid_at,
+                                         u32 sys_at, std::string_view geo_attrs_csv) const;
+
   /// Undoes one accepted merge and recomputes the affected clustering.
   void unmerge_pair(u32 pair_index);
 

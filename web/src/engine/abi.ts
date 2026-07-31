@@ -117,6 +117,23 @@ export function writeI64Bits(view: DataView, offset: number, value: number): voi
 }
 
 /**
+ * Writes a Sym payload, mirroring `Value::symbol()`.
+ *
+ * A symbol value is a `SymbolId` in the LOW 32 bits with the high half zeroed —
+ * `{static_cast<u64>(s.v), Kind::Sym}` in value.hpp. Deliberately not routed
+ * through writeI64Bits: the bit pattern happens to coincide today, but an id and
+ * an integer are different things and a reader that confuses them is a bug the
+ * type system cannot catch.
+ *
+ * The id must come from `Engine.intern`, which is the same SymbolTable the
+ * engine resolves against when it renders the value back out.
+ */
+export function writeSymBits(view: DataView, offset: number, symbolId: number): void {
+  view.setUint32(offset, symbolId >>> 0, true)
+  view.setUint32(offset + 4, 0, true)
+}
+
+/**
  * Writes one wire::Fact at `recordIndex` into a staging DataView.
  *
  * The caller supplies the already-encoded 8-byte payload via a writer callback

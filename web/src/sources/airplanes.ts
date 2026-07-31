@@ -30,7 +30,7 @@
 // like AIS these facts sit on the scrubber's diagonal: `seen_pos` seconds ago is
 // both when it was true and when we learned it.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
+import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import { bucketBatches, type Batch, type EntityRegistry } from './batch'
 import { SOURCES } from './registry'
 import { Sensitivity, type SourceSpec } from './spec'
@@ -109,12 +109,14 @@ export async function fetchMilitaryAircraft(
 export interface AircraftAttrs {
   position: number
   altitude: number
+  label: number
 }
 
 export function buildAircraftBatches(
   aircraft: readonly Aircraft[],
   registry: EntityRegistry,
   attrs: AircraftAttrs,
+  intern: (text: string) => number,
 ): Batch[] {
   return bucketBatches(
     aircraft,
@@ -141,6 +143,27 @@ export function buildAircraftBatches(
         source: SOURCES.airplanes_live!.id,
         writePayload: (v, off) => writeF64Bits(v, off, a.altitudeFt),
       })
+
+      // Callsign and type ONLY, both broadcast in the clear by the aircraft
+      // itself. This is the layer where the temptation to overreach lives, so
+      // the boundary is worth restating where the code is: the label is what the
+      // transponder says, never what a registry lookup would add. No tail-number
+      // resolution, no operator, no owner. "Where is this open-data aircraft" is
+      // a question about a machine; joining it to a person is a different
+      // question and this project declines it.
+      const label = [a.callsign, a.type].filter((x) => x.length > 0).join(' · ')
+      if (label.length > 0) {
+        const sym = intern(label)
+        push({
+          entity,
+          attr: attrs.label,
+          kind: Kind.Sym,
+          validFrom,
+          validTo: OPEN_VALID,
+          source: SOURCES.airplanes_live!.id,
+          writePayload: (v, off) => writeSymBits(v, off, sym),
+        })
+      }
     },
   )
 }
@@ -158,14 +181,23 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
     // identifiable asset, where an earthquake epicentre locates an event.
     { name: 'aircraft_position', sensitivity: Sensitivity.Precise },
     { name: 'altitude', sensitivity: Sensitivity.Public },
+    // Public: a callsign is broadcast unencrypted by the aircraft. It is not a
+    // person, and nothing here resolves it to one.
+    { name: 'aircraft_label', sensitivity: Sensitivity.Public },
   ],
   fetch: (signal) => fetchMilitaryAircraft(AIRPLANES_MIL_URL, signal),
   normalize(raw, ctx) {
     return {
-      batches: buildAircraftBatches(raw.aircraft, ctx.registry, {
-        position: ctx.attrs.aircraft_position!,
-        altitude: ctx.attrs.altitude!,
-      }),
+      batches: buildAircraftBatches(
+        raw.aircraft,
+        ctx.registry,
+        {
+          position: ctx.attrs.aircraft_position!,
+          altitude: ctx.attrs.altitude!,
+          label: ctx.attrs.aircraft_label!,
+        },
+        ctx.intern,
+      ),
       count: raw.aircraft.length,
     }
   },

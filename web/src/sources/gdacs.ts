@@ -23,7 +23,7 @@
 // an earthquake and a wind speed for a cyclone. The alert level is the one field
 // GDACS defines consistently across all of them.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
+import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import { bucketBatches, type Batch, type EntityRegistry } from './batch'
 import { SOURCES } from './registry'
 import { Sensitivity, type SourceSpec } from './spec'
@@ -109,7 +109,17 @@ export async function fetchGdacs(
       lon,
       alert: ALERT_LEVEL[String(p['alertlevel'] ?? 'Green')] ?? 0,
       eventType: String(p['eventtype'] ?? '?'),
-      name: String(p['eventname'] ?? p['name'] ?? ''),
+      // `??` is wrong here and was: GDACS sends eventname as an EMPTY STRING
+      // for everything except named storms, and empty string is not nullish, so
+      // it won the coalesce and the label came out blank for 98 of 100 events.
+      // `name` is the descriptive one ("Earthquake in Japan"); `eventname` is
+      // the storm designation ("GENEVIEVE-26"). Keep both when both exist.
+      name: (() => {
+        const storm = String(p['eventname'] ?? '').trim()
+        const described = String(p['name'] ?? '').trim()
+        if (storm && described) return `${described} (${storm})`
+        return described || storm
+      })(),
       fromUnix: from,
       // Falls back to fromdate when GDACS has not revised — which puts the fact
       // exactly on the diagonal, where it belongs, rather than inventing a
@@ -124,12 +134,14 @@ export async function fetchGdacs(
 export interface GdacsAttrs {
   position: number
   alert: number
+  label: number
 }
 
 export function buildGdacsBatches(
   events: readonly GdacsEvent[],
   registry: EntityRegistry,
   attrs: GdacsAttrs,
+  intern: (text: string) => number,
 ): Batch[] {
   return bucketBatches(
     events,
@@ -156,6 +168,22 @@ export function buildGdacsBatches(
         source: SOURCES.gdacs!.id,
         writePayload: (v, off) => writeF64Bits(v, off, e.alert),
       })
+
+      // GDACS revises the assessment, and the name goes with it — an event
+      // renamed as its location firms up is a revision worth being able to
+      // scrub back through, which is exactly what storing it as a fact buys.
+      if (e.name.length > 0) {
+        const sym = intern(e.name)
+        push({
+          entity,
+          attr: attrs.label,
+          kind: Kind.Sym,
+          validFrom,
+          validTo: OPEN_VALID,
+          source: SOURCES.gdacs!.id,
+          writePayload: (v, off) => writeSymBits(v, off, sym),
+        })
+      }
     },
   )
 }
@@ -171,14 +199,21 @@ export const gdacsSpec: SourceSpec<{ events: GdacsEvent[]; rejected: number }> =
   attributes: [
     { name: 'alert_position', sensitivity: Sensitivity.Public },
     { name: 'alert_level', sensitivity: Sensitivity.Public },
+    { name: 'alert_label', sensitivity: Sensitivity.Public },
   ],
   fetch: (signal) => fetchGdacs(GDACS_URL, signal),
   normalize(raw, ctx) {
     return {
-      batches: buildGdacsBatches(raw.events, ctx.registry, {
-        position: ctx.attrs.alert_position!,
-        alert: ctx.attrs.alert_level!,
-      }),
+      batches: buildGdacsBatches(
+        raw.events,
+        ctx.registry,
+        {
+          position: ctx.attrs.alert_position!,
+          alert: ctx.attrs.alert_level!,
+          label: ctx.attrs.alert_label!,
+        },
+        ctx.intern,
+      ),
       count: raw.events.length,
     }
   },

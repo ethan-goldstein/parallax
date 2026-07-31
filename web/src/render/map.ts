@@ -87,6 +87,33 @@ const BOUNDARY_PAINT: Record<string, { color: string; opacity: number; boost: nu
 /** Imagery is bright and busy; borders need more contrast over it than over dark. */
 const BOUNDARY_OPACITY_OVER_IMAGERY = 0.9
 
+/** Screen-space hit tolerance. Roughly a fingertip, and wider than most dots. */
+const PICK_TOLERANCE_PX = 12
+
+/** Where the user pointed, in both the world's units and the screen's. */
+export interface PickEvent {
+  lat: number
+  lon: number
+  /** Great-circle radius equivalent to PICK_TOLERANCE_PX at this zoom. */
+  radiusM: number
+  screen: { x: number; y: number }
+}
+
+/**
+ * Great-circle distance in metres, mirroring px::haversine_m so the client and
+ * the engine agree on what "within 12 pixels" means.
+ */
+function haversineMetres(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6_371_008.8
+  const toRad = Math.PI / 180
+  const dLat = (lat2 - lat1) * toRad
+  const dLon = (lon2 - lon1) * toRad
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)))
+}
+
 export interface GlobeOptions {
   container: HTMLElement
   maxPoints: number
@@ -251,6 +278,7 @@ export class Globe {
     else map.once('style.load', () => this.#onStyleLoaded())
 
     map.on('render', () => this.#tick())
+    this.#bindPicking(map)
 
     // Feed failures are surfaced in the layer panel; a basemap or tile failure
     // should not be the one thing that fails silently.
@@ -379,6 +407,68 @@ export class Globe {
     // MapLibre reports the resolved projection; during a transition it reports
     // the target, which is what a toggle wants to reflect.
     return this.#map?.getProjection()?.type === 'mercator' ? 'mercator' : 'globe'
+  }
+
+  // ── picking ──────────────────────────────────────────────────────────────
+
+  /**
+   * Reports hover and click positions, with a radius in metres.
+   *
+   * The radius is derived by unprojecting the cursor and a point twelve pixels
+   * to its right and measuring the ground distance between them, so tolerance
+   * stays twelve screen pixels at every zoom and under both projections —
+   * a fixed distance would be unusably coarse at z1 and unusably tight at z14.
+   *
+   * Hover is throttled to one animation frame. mousemove fires far faster than
+   * that, and every extra call is a spatial query and a JSON build that nothing
+   * will ever read.
+   */
+  onPick(handler: (pick: PickEvent | null, kind: 'hover' | 'click') => void): void {
+    this.#onPick = handler
+  }
+
+  #onPick: ((pick: PickEvent | null, kind: 'hover' | 'click') => void) | null = null
+  #pickQueued = false
+
+  #radiusMetres(map: MlMap, point: { x: number; y: number }): number {
+    const a = map.unproject([point.x, point.y])
+    const b = map.unproject([point.x + PICK_TOLERANCE_PX, point.y])
+    return haversineMetres(a.lat, a.lng, b.lat, b.lng)
+  }
+
+  #bindPicking(map: MlMap): void {
+    map.on('mousemove', (e) => {
+      if (!this.#onPick || this.#pickQueued) return
+      this.#pickQueued = true
+      requestAnimationFrame(() => {
+        this.#pickQueued = false
+        if (!this.#onPick) return
+        const ll = map.unproject(e.point)
+        this.#onPick(
+          { lat: ll.lat, lon: ll.lng, radiusM: this.#radiusMetres(map, e.point), screen: e.point },
+          'hover',
+        )
+      })
+    })
+
+    // A cursor that leaves the canvas must clear the tooltip, or it hangs over
+    // the HUD pointing at nothing.
+    map.on('mouseout', () => this.#onPick?.(null, 'hover'))
+
+    map.on('click', (e) => {
+      if (!this.#onPick) return
+      const ll = map.unproject(e.point)
+      this.#onPick(
+        { lat: ll.lat, lon: ll.lng, radiusM: this.#radiusMetres(map, e.point), screen: e.point },
+        'click',
+      )
+    })
+  }
+
+  /** Sets the cursor, so a pickable point looks pickable. */
+  setPickCursor(over: boolean): void {
+    const canvas = this.#map?.getCanvas()
+    if (canvas) canvas.style.cursor = over ? 'pointer' : ''
   }
 
   /** Flies the camera to a point, used by search results and alert firings. */

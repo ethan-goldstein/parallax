@@ -344,6 +344,19 @@ void Store::rebuild_entity_index() {
   entity_index_valid_ = true;
 }
 
+void Store::all_facts_for_entity(EntityId entity, std::vector<FactId>& out) const {
+  if (!entity_index_valid_ || entity.index() + 1 >= entity_offset_.size()) {
+    for (u32 i = 0; i < static_cast<u32>(entity_.size()); ++i) {
+      if (entity_[i] == entity.v) out.push_back(FactId{i});
+    }
+    return;
+  }
+
+  const u32 begin = entity_offset_[entity.index()];
+  const u32 end = entity_offset_[entity.index() + 1];
+  for (u32 k = begin; k < end; ++k) out.push_back(FactId{entity_facts_[k]});
+}
+
 void Store::as_of_entity(EntityId entity, Timestamp valid_at, TxnId sys_at,
                          std::vector<FactId>& out, ScanStats* stats) const {
   // Falling back to a full scan when the index is stale keeps a missing

@@ -29,7 +29,7 @@
 // README's rule applies: if a revision is not in the data, it does not go on
 // the axis.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
+import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import { bucketBatches, type Batch, type EntityRegistry } from './batch'
 import { SOURCES } from './registry'
 import { Sensitivity, type SourceSpec } from './spec'
@@ -114,12 +114,14 @@ export async function fetchEonet(
 export interface EonetAttrs {
   position: number
   intensity: number
+  label: number
 }
 
 export function buildEonetBatches(
   events: readonly EonetEvent[],
   registry: EntityRegistry,
   attrs: EonetAttrs,
+  intern: (text: string) => number,
   nowUnix: number,
 ): Batch[] {
   return bucketBatches(
@@ -150,6 +152,21 @@ export function buildEonetBatches(
         // a scalar to bind, not because the number carries information.
         writePayload: (v, off) => writeF64Bits(v, off, 1),
       })
+
+      // Category first, because "Wildfire" is the thing you want to read before
+      // the title — and because the layer draws every category identically, so
+      // the label is the only place the distinction survives.
+      const title = e.title.length > 0 ? `${e.category} — ${e.title}` : e.category
+      const sym = intern(title)
+      push({
+        entity,
+        attr: attrs.label,
+        kind: Kind.Sym,
+        validFrom,
+        validTo: OPEN_VALID,
+        source: SOURCES.eonet!.id,
+        writePayload: (v, off) => writeSymBits(v, off, sym),
+      })
     },
   )
 }
@@ -165,6 +182,7 @@ export const eonetSpec: SourceSpec<{ events: EonetEvent[]; rejected: number }> =
   attributes: [
     { name: 'event_position', sensitivity: Sensitivity.Public },
     { name: 'event_intensity', sensitivity: Sensitivity.Public },
+    { name: 'event_label', sensitivity: Sensitivity.Public },
   ],
   fetch: (signal) => fetchEonet(EONET_URL, signal),
   normalize(raw, ctx) {
@@ -175,7 +193,9 @@ export const eonetSpec: SourceSpec<{ events: EonetEvent[]; rejected: number }> =
         {
           position: ctx.attrs.event_position!,
           intensity: ctx.attrs.event_intensity!,
+          label: ctx.attrs.event_label!,
         },
+        ctx.intern,
         Math.floor(Date.now() / 1000),
       ),
       count: raw.events.length,

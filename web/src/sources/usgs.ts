@@ -31,7 +31,7 @@
 // revised nothing produces few transactions, and the system axis is
 // correspondingly short. That is the truth about the data.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
+import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import type { FactInput } from '../engine/engine'
 import type { Batch } from './batch'
 import { EntityRegistry } from './batch'
@@ -170,6 +170,8 @@ export interface AttrIds {
   position: number
   magnitude: number
   depth: number
+  /** SymbolId of the human-readable place, e.g. "46 km E of Petropavlovsk". */
+  label: number
 }
 
 /**
@@ -188,6 +190,7 @@ export function buildBatches(
   quakes: readonly Quake[],
   registry: EntityRegistry,
   attrs: AttrIds,
+  intern: (text: string) => number,
   sourceId = 0,
 ): Batch[] {
   const BUCKET_SECONDS = 60
@@ -248,6 +251,24 @@ export function buildBatches(
         source: sourceId,
         writePayload: (v, off) => writeF64Bits(v, off, q.depthKm),
       })
+
+      // The place string is what makes a dot legible — "46 km E of
+      // Petropavlovsk" rather than `us7000abcd`. It is stored as a fact rather
+      // than kept in a client-side table so it carries this source and this
+      // licence, and so scrubbing the system axis shows the description USGS
+      // was publishing at that time.
+      if (q.place.length > 0) {
+        const sym = intern(q.place)
+        facts.push({
+          entity,
+          attr: attrs.label,
+          kind: Kind.Sym,
+          validFrom,
+          validTo: OPEN_VALID,
+          source: sourceId,
+          writePayload: (v, off) => writeSymBits(v, off, sym),
+        })
+      }
     }
 
     return { wallClockUnix: bucket, facts }
@@ -272,6 +293,7 @@ export const usgsSpec: SourceSpec<FetchResult> = {
     { name: 'position', sensitivity: Sensitivity.Public },
     { name: 'magnitude', sensitivity: Sensitivity.Public },
     { name: 'depth', sensitivity: Sensitivity.Public },
+    { name: 'label', sensitivity: Sensitivity.Public },
   ],
   fetch: (signal) => fetchQuakes(USGS_FEEDS.week, signal),
   normalize(raw, ctx) {
@@ -279,9 +301,10 @@ export const usgsSpec: SourceSpec<FetchResult> = {
       position: ctx.attrs.position!,
       magnitude: ctx.attrs.magnitude!,
       depth: ctx.attrs.depth!,
+      label: ctx.attrs.label!,
     }
     return {
-      batches: buildBatches(raw.quakes, ctx.registry, attrs, SOURCES.usgs!.id),
+      batches: buildBatches(raw.quakes, ctx.registry, attrs, ctx.intern, SOURCES.usgs!.id),
       count: raw.quakes.length,
     }
   },

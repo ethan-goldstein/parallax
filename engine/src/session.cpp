@@ -377,6 +377,163 @@ std::string Session::merge_evidence_json(u32 limit) const {
   return s;
 }
 
+// ── inspect ────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// Renders a Value for display, resolving symbols against the store's table.
+void json_value(std::string& out, const Value& v, const SymbolTable& syms) {
+  switch (v.kind) {
+    case Kind::F64: json_num(out, v.as_f64()); return;
+    case Kind::I64: out += std::to_string(v.as_i64()); return;
+    case Kind::Bool: out += v.as_bool() ? "true" : "false"; return;
+    case Kind::Time: out += std::to_string(to_unix(v.as_time())); return;
+    case Kind::Sym: json_str(out, syms.text(v.as_symbol())); return;
+    case Kind::Geo: {
+      const GeoPoint g = v.as_geo();
+      out += "{\"lat\":";
+      json_num(out, g.lat());
+      out += ",\"lon\":";
+      json_num(out, g.lon());
+      out += '}';
+      return;
+    }
+    case Kind::Ref: out += std::to_string(v.as_entity().v); return;
+    case Kind::Null: out += "null"; return;
+  }
+  out += "null";
+}
+
+/// One fact, as a JSON object. `syms` resolves both the attribute name and any
+/// symbol value.
+void json_fact(std::string& out, const Store& store, FactId f) {
+  const SymbolTable& syms = store.symbols();
+  out += "{\"attr\":";
+  json_str(out, syms.text(store.fact_attr(f)));
+  out += ",\"kind\":" + std::to_string(static_cast<u32>(store.fact_value(f).kind));
+  out += ",\"value\":";
+  json_value(out, store.fact_value(f), syms);
+  out += ",\"source\":" + std::to_string(store.fact_source(f).v);
+  out += ",\"validFrom\":" + std::to_string(to_unix(store.fact_valid_from(f)));
+  out += ",\"validTo\":" + std::to_string(to_unix(store.fact_valid_to(f)));
+  out += ",\"sysFrom\":" + std::to_string(store.fact_sys_from(f));
+  out += ",\"sysTo\":" + std::to_string(store.fact_sys_to(f));
+  out += '}';
+}
+
+/// Parses "12,17,23" into a small set. Empty means "accept any geometry".
+std::vector<u32> parse_csv_ids(std::string_view csv) {
+  std::vector<u32> out;
+  u32 cur = 0;
+  bool any = false;
+  for (const char c : csv) {
+    if (c >= '0' && c <= '9') {
+      cur = cur * 10 + static_cast<u32>(c - '0');
+      any = true;
+    } else if (any) {
+      out.push_back(cur);
+      cur = 0;
+      any = false;
+    }
+  }
+  if (any) out.push_back(cur);
+  return out;
+}
+
+}  // namespace
+
+std::string Session::inspect_json(f64 lat, f64 lon, f64 radius_m, Timestamp valid_at, u32 sys_at,
+                                  std::string_view geo_attrs_csv) const {
+  const std::vector<u32> allowed = parse_csv_ids(geo_attrs_csv);
+
+  const auto permitted = [&](SymbolId attr) {
+    if (allowed.empty()) return true;
+    for (const u32 a : allowed) {
+      if (a == attr.v) return true;
+    }
+    return false;
+  };
+
+  // Widen once before giving up. The index returns spatial neighbours, and at a
+  // dense location the first k can all be invisible at this (T, S) while a
+  // visible one sits just past them.
+  FactId hit{0};
+  bool found = false;
+  f64 best_m = 0.0;
+
+  for (const u32 k : {32u, 256u}) {
+    std::vector<u32> candidates;
+    geo_.query_knn(lat, lon, k, candidates);
+
+    for (const u32 ref : candidates) {
+      const FactId f{ref};
+      if (!store_.visible_at(f, valid_at, TxnId{sys_at})) continue;
+      if (!permitted(store_.fact_attr(f))) continue;
+
+      const Value v = store_.fact_value(f);
+      if (v.kind != Kind::Geo) continue;
+      const GeoPoint g = v.as_geo();
+      const f64 d = haversine_m(lat, lon, g.lat(), g.lon());
+      if (d > radius_m) continue;
+
+      hit = f;
+      best_m = d;
+      found = true;
+      break;
+    }
+    if (found) break;
+  }
+
+  if (!found) return "{\"hit\":false}";
+
+  const EntityId entity = store_.fact_entity(hit);
+  const GeoPoint g = store_.fact_value(hit).as_geo();
+
+  std::string s;
+  s.reserve(4096);
+  s += "{\"hit\":true";
+  s += ",\"factId\":" + std::to_string(hit.v);
+  s += ",\"entity\":" + std::to_string(entity.v);
+  s += ",\"lat\":";
+  json_num(s, g.lat());
+  s += ",\"lon\":";
+  json_num(s, g.lon());
+  s += ",\"distanceM\":";
+  json_num(s, best_m);
+  s += ",\"attr\":";
+  json_str(s, store_.symbols().text(store_.fact_attr(hit)));
+  s += ",\"source\":" + std::to_string(store_.fact_source(hit).v);
+
+  // What is true right now, at the caller's point on both axes.
+  s += ",\"attributes\":[";
+  {
+    std::vector<FactId> now;
+    store_.as_of_entity(entity, valid_at, TxnId{sys_at}, now);
+    for (usize i = 0; i < now.size(); ++i) {
+      if (i) s += ',';
+      json_fact(s, store_, now[i]);
+    }
+  }
+  s += ']';
+
+  // Everything ever said about it. The UI shows only attributes with more than
+  // one version, which is where "M4.8 revised to M5.2" comes from — but the
+  // filtering is the view's job, because "what changed" is a question about
+  // presentation and "what was said" is a question about the store.
+  s += ",\"history\":[";
+  {
+    std::vector<FactId> all;
+    store_.all_facts_for_entity(entity, all);
+    for (usize i = 0; i < all.size(); ++i) {
+      if (i) s += ',';
+      json_fact(s, store_, all[i]);
+    }
+  }
+  s += "]}";
+
+  return s;
+}
+
 void Session::register_source(std::string_view name, SymbolId geo_attr,
                               SymbolId scalar_attr) {
   for (SourceBinding& b : sources_) {

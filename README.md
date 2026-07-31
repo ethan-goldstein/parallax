@@ -53,7 +53,7 @@ engine/                  C++20. No emscripten, no I/O, no renderer. Bytes in, by
         └── native/        → px_cli, px_bench benchmarks and reference outputs
 ```
 
-**One codebase, two targets.** The native build is what makes the tests meaningful — 123 test cases
+**One codebase, two targets.** The native build is what makes the tests meaningful — 128 test cases
 and 48,000+ assertions run under AddressSanitizer and UndefinedBehaviorSanitizer on every push, which
 is not possible in a browser.
 
@@ -293,9 +293,15 @@ Restraint is a design requirement here, not an afterthought:
   with geometry, so it filtered nothing while EXPLAIN displayed a `since` node above the unfiltered
   result. Because `limit` did execute, an unordered `limit 20` also returned an arbitrary twenty.
   Both now run, and `tests/test_plan.cpp` fails against the old behaviour.
-- **No provenance "peel" interaction or export license-conflict panel.** The data is all there — every
-  fact carries a `SourceId`, and the registry has share-alike and non-commercial flags — but the
-  interaction is not built.
+- **No export license-conflict panel.** Clicking a point now answers what it is and who says so —
+  name, every attribute with the agency that supplied it, both time axes, and the licence — but the
+  check that fires *before* an export, when a result set mixes ODbL with a permissive source, is
+  still not built.
+- **Nothing supersedes a fact.** `Store::retract` exists and no feed adapter calls it, so a
+  correction currently appends beside the old value rather than displacing it. The inspector reads
+  the full per-entity history and will show `4.8 → 5.2` the moment an adapter issues a retraction;
+  until one does, that section is empty. The machinery is real and the data is not there yet, which
+  is a different thing from the feature working.
 - **`k=5` in the policy engine is a judgement call, not a standard.** Real k-anonymity work picks k
   from the data and the threat model.
 - **Unregistered attributes default to `Public`** — fail-open, defensible only because this project

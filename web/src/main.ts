@@ -22,6 +22,7 @@ import { renderAudit, type AuditLog } from './ui/audit'
 import { runBenchmark } from './ui/bench'
 import { renderEvidence, type MergeEvidence } from './ui/evidence'
 import { renderExplain, type ExplainPlan } from './ui/explain'
+import { renderInspector, renderTooltip, type InspectResult } from './ui/inspector'
 import { renderLayerPanel, updateLayerCounts } from './ui/layerPanel'
 import { Scrubber } from './ui/scrubber'
 
@@ -65,6 +66,7 @@ app.innerHTML = `
 
   <aside class="rail rail-right">
     <section class="panel readout" id="readout" aria-live="polite"></section>
+    <section class="panel inspector" id="inspector"></section>
     <section class="panel explain" id="explain"></section>
     <section class="panel evidence" id="evidence"></section>
     <section class="panel audit" id="audit"></section>
@@ -72,6 +74,8 @@ app.innerHTML = `
       <button id="bench-run" class="bench-run" type="button">run benchmark</button>
     </section>
   </aside>
+
+  <div class="tooltip" id="tooltip" hidden></div>
 
   <div class="map-controls">
     <div class="seg" id="basemap-seg" role="group" aria-label="basemap">
@@ -249,6 +253,62 @@ async function main(): Promise<void> {
     })
 
   drawLayerPanel()
+
+  // ── picking ──────────────────────────────────────────────────────────────
+  //
+  // The engine picks the row, given a position. It is never handed a fact id:
+  // Store's row accessors are unchecked, so a caller-supplied index would put an
+  // out-of-bounds read one typo away.
+  const inspectorEl = document.querySelector<HTMLElement>('#inspector')!
+  const tooltipEl = document.querySelector<HTMLElement>('#tooltip')!
+
+  /**
+   * The geometry attributes currently ON SCREEN, as the engine wants them.
+   *
+   * The engine has no notion of a layer being switched off and should not
+   * acquire one, so the view states it. While a query is showing, only the
+   * queried layer is drawn — picking has to narrow to it too, or it would
+   * identify points that are not visible.
+   */
+  function displayedGeoAttrs(): string {
+    const active = queryActive ? [layerForQuery(queryInput.value) ?? LAYERS[0]] : LAYERS
+    return active
+      .filter((l): l is (typeof LAYERS)[number] => !!l && visible[l.name] !== false)
+      .map((l) => attrs[l.geoAttr])
+      .filter((id): id is number => id !== undefined)
+      .join(',')
+  }
+
+  function pick(lat: number, lon: number, radiusM: number): InspectResult | null {
+    const attrList = displayedGeoAttrs()
+    if (attrList.length === 0) return null
+    try {
+      return JSON.parse(
+        engine.inspect(lat, lon, radiusM, state.validAt, state.sysAt, attrList),
+      ) as InspectResult
+    } catch (err) {
+      console.error('[parallax] inspect was not valid JSON', err)
+      return null
+    }
+  }
+
+  globe.onPick((ev, kind) => {
+    if (!ev) {
+      renderTooltip(tooltipEl, null, null)
+      return
+    }
+    const result = pick(ev.lat, ev.lon, ev.radiusM)
+
+    if (kind === 'hover') {
+      renderTooltip(tooltipEl, result, ev.screen)
+      globe.setPickCursor(!!result?.hit)
+      return
+    }
+
+    // A click on empty ocean clears the panel rather than leaving the last
+    // selection pinned, which would quietly stop matching the map.
+    renderInspector(inspectorEl, result)
+  })
 
   // ── scrubber ─────────────────────────────────────────────────────────────
   const transactions = engine.transactions()

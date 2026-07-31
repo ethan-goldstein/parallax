@@ -60,6 +60,15 @@ export type AttrIds = Readonly<Record<string, number>>
 export interface NormalizeContext {
   attrs: AttrIds
   registry: EntityRegistry
+  /**
+   * Interns a string and returns its SymbolId, for `Kind::Sym` values.
+   *
+   * Memoised inside Engine, so a place name repeated across a thousand quakes
+   * costs one map lookup after the first. The id is only meaningful against the
+   * engine's own SymbolTable — which is the point: the engine resolves it back
+   * to text when it renders provenance, so no symbol table crosses the boundary.
+   */
+  intern: (text: string) => number
 }
 
 /**

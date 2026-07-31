@@ -160,6 +160,18 @@ class Store {
   void as_of_entity(EntityId entity, Timestamp valid_at, TxnId sys_at,
                     std::vector<FactId>& out, ScanStats* stats = nullptr) const;
 
+  /// Every row for one entity, in insertion order, with NO bitemporal filter.
+  ///
+  /// as_of_entity answers "what is true now"; this answers "what has ever been
+  /// said". They are different questions and provenance needs the second one: a
+  /// magnitude revised from 4.8 to 5.2 is two rows, and the filtered view can
+  /// only ever return the survivor. Ordering is by FactId, which is assignment
+  /// order, so a caller reading it as history does not have to sort.
+  ///
+  /// Same stale-index fallback as as_of_entity — a forgotten
+  /// rebuild_entity_index() stays a performance bug rather than a wrong answer.
+  void all_facts_for_entity(EntityId entity, std::vector<FactId>& out) const;
+
   /// Rebuilds the entity index. O(n), counting sort, one allocation. Called
   /// after a bulk ingest rather than per fact — maintaining it incrementally
   /// would cost more than rebuilding for the batch sizes involved here.

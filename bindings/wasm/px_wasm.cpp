@@ -194,6 +194,19 @@ std::string merge_evidence(u32 limit) {
   return session().merge_evidence_json(limit);
 }
 
+/// Nearest visible point to a click, with everything knowable about it.
+///
+/// Note what this does NOT take: a FactId. Store's fact accessors index raw
+/// vectors with no bounds check, so handing JavaScript a row index to pass back
+/// would put an out-of-bounds read one typo away. The caller supplies a position
+/// and the engine chooses the row, which makes the unchecked accessors
+/// unreachable from outside.
+std::string inspect(double lat, double lon, double radius_m, int valid_at, u32 sys_at,
+                    const std::string& geo_attrs) {
+  return session().inspect_json(lat, lon, radius_m, static_cast<px::Timestamp>(valid_at), sys_at,
+                                geo_attrs);
+}
+
 void unmerge_pair(u32 pair_index) {
   session().unmerge_pair(pair_index);
 }
@@ -391,6 +404,7 @@ EMSCRIPTEN_BINDINGS(parallax) {
   emscripten::function("finishIngest", &finish_ingest);
   emscripten::function("resolveEntities", &resolve_entities);
   emscripten::function("mergeEvidence", &merge_evidence);
+  emscripten::function("inspect", &inspect);
   emscripten::function("unmergePair", &unmerge_pair);
 
   emscripten::function("registerSource", &register_source);

@@ -8,6 +8,20 @@
       "port": 4173
     },
     {
+      "name": "parallax-preview-4174",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "preview",
+        "--prefix",
+        "/Users/ethangoldstein/AI-WORK/parallax/web",
+        "--",
+        "--port",
+        "4174"
+      ],
+      "port": 4174
+    },
+    {
       "name": "parallax-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "/Users/ethangoldstein/AI-WORK/parallax/web"],

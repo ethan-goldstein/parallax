@@ -1,4 +1,10 @@
+// <string>/<string_view> reach here transitively through px/session.hpp, but
+// naming them is the difference between compiling by luck and compiling by
+// contract — and a transitive include is exactly what broke the Linux CI build
+// last time while passing locally.
 #include <cstring>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <doctest.h>
@@ -148,4 +154,171 @@ TEST_CASE("query_points reflects the system-time axis") {
   // engine boundary rather than only through the UI.
   CHECK(s.query_points(50, txn1, pos, SymbolId{}).count == 1);
   CHECK(s.query_points(50, txn2, pos, SymbolId{}).count == 2);
+}
+
+// ── inspect ────────────────────────────────────────────────────────────────
+//
+// Picking runs through the Morton index, not the render buffer. That is not a
+// preference: Session::query_points always returns points_.data(), one fixed
+// allocation reused by every call, so after a multi-layer refresh it holds only
+// the LAST layer's points. A caller that retained a handle per layer would read
+// the wrong rows and never be told.
+
+namespace {
+
+wire::Fact f64_fact(u32 entity, u32 attr, f64 value, i32 from, i32 to) {
+  const Value v = Value::real(value);
+  return wire::Fact{v.bits, entity, attr, from, to, 0, static_cast<u8>(v.kind), 0};
+}
+
+wire::Fact sym_fact(u32 entity, u32 attr, SymbolId sym, i32 from, i32 to) {
+  const Value v = Value::symbol(sym);
+  return wire::Fact{v.bits, entity, attr, from, to, 0, static_cast<u8>(v.kind), 0};
+}
+
+/// Substring search — the JSON is asserted on by shape, not parsed, because a
+/// parser in the test would be a second implementation to keep correct.
+bool has(const std::string& hay, std::string_view needle) {
+  return hay.find(needle) != std::string::npos;
+}
+
+}  // namespace
+
+TEST_CASE("all_facts_for_entity returns versions that as_of_entity filters away") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+  const SymbolId mag = s.intern("magnitude");
+
+  std::vector<wire::Fact> t1;
+  t1.push_back(geo_fact(7, pos.v, 10.0, 20.0, 0, kOpenValid));
+  t1.push_back(f64_fact(7, mag.v, 4.8, 0, kOpenValid));
+  s.ingest(0, stage(s, t1), 1000);
+
+  // Supersession is EXPLICIT in this store: assert_fact appends, and nothing is
+  // implicitly displaced. A feed adapter correcting a value has to retract the
+  // old row, and no adapter does that yet — see the note in digitraffic.ts.
+  // Doing it by hand here is what a corrected feed will look like.
+  // Row 0 is the position, row 1 the magnitude — assignment order.
+  const FactId old_mag{1};
+  s.store().begin_txn(2000);
+  s.store().retract(old_mag);
+  s.store().assert_fact(EntityId{7}, mag, Value::real(5.2), 0, kOpenValid, SourceId{0});
+  s.store().commit_txn();
+  s.finish_ingest();
+
+  const u32 latest = s.store().current_txn().v;
+
+  std::vector<FactId> now;
+  s.store().as_of_entity(EntityId{7}, 50, TxnId{latest}, now);
+
+  std::vector<FactId> all;
+  s.store().all_facts_for_entity(EntityId{7}, all);
+
+  // The filtered view can only show the survivor; history holds both beliefs.
+  CHECK(now.size() == 2);  // position + the corrected magnitude
+  CHECK(all.size() == 3);  // ... plus the retracted belief, still on the record
+  CHECK(all.size() > now.size());
+
+  // Ascending FactId, which is assignment order — a caller reading it as
+  // history must not have to sort it.
+  for (usize i = 1; i < all.size(); ++i) CHECK(all[i - 1].v < all[i].v);
+}
+
+TEST_CASE("inspect misses outside the radius and hits inside it") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+
+  std::vector<wire::Fact> b;
+  b.push_back(geo_fact(1, pos.v, 60.0, 25.0, 0, kOpenValid));
+  s.ingest(0, stage(s, b), 1000);
+  s.finish_ingest();
+
+  const u32 sys = s.store().current_txn().v;
+
+  // ~1.1 km away: outside a 500 m radius, inside a 5 km one.
+  const std::string miss = s.inspect_json(60.01, 25.0, 500.0, 50, sys, "");
+  CHECK(has(miss, "\"hit\":false"));
+
+  const std::string hit = s.inspect_json(60.01, 25.0, 5000.0, 50, sys, "");
+  CHECK(has(hit, "\"hit\":true"));
+  CHECK(has(hit, "\"entity\":1"));
+}
+
+TEST_CASE("inspect picks the nearer of two candidates") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+
+  std::vector<wire::Fact> b;
+  b.push_back(geo_fact(1, pos.v, 60.000, 25.0, 0, kOpenValid));
+  b.push_back(geo_fact(2, pos.v, 60.050, 25.0, 0, kOpenValid));
+  s.ingest(0, stage(s, b), 1000);
+  s.finish_ingest();
+
+  const u32 sys = s.store().current_txn().v;
+
+  CHECK(has(s.inspect_json(60.001, 25.0, 50'000.0, 50, sys, ""), "\"entity\":1"));
+  CHECK(has(s.inspect_json(60.049, 25.0, 50'000.0, 50, sys, ""), "\"entity\":2"));
+}
+
+TEST_CASE("inspect honours the caller's displayed-attribute list") {
+  Session s;
+  const SymbolId quake = s.intern("position");
+  const SymbolId vessel = s.intern("vessel_position");
+
+  std::vector<wire::Fact> b;
+  b.push_back(geo_fact(1, quake.v, 60.0, 25.0, 0, kOpenValid));
+  b.push_back(geo_fact(2, vessel.v, 60.001, 25.0, 0, kOpenValid));
+  s.ingest(0, stage(s, b), 1000);
+  s.finish_ingest();
+
+  const u32 sys = s.store().current_txn().v;
+
+  // The vessel is nearer, but a caller showing only the seismic layer must not
+  // be told about it — visibility is a property of the view, and this is how
+  // the view states it.
+  const std::string only_quakes =
+      s.inspect_json(60.0009, 25.0, 50'000.0, 50, sys, std::to_string(quake.v));
+  CHECK(has(only_quakes, "\"entity\":1"));
+
+  const std::string both = s.inspect_json(
+      60.0009, 25.0, 50'000.0, 50, sys, std::to_string(quake.v) + "," + std::to_string(vessel.v));
+  CHECK(has(both, "\"entity\":2"));
+
+  // Empty means "any geometry", not "no geometry".
+  CHECK(has(s.inspect_json(60.0009, 25.0, 50'000.0, 50, sys, ""), "\"hit\":true"));
+}
+
+TEST_CASE("inspect surfaces every version, and resolves symbols to text") {
+  Session s;
+  const SymbolId pos = s.intern("position");
+  const SymbolId mag = s.intern("magnitude");
+  const SymbolId label = s.intern("label");
+  const SymbolId place = s.intern("46 km E of Petropavlovsk");
+
+  std::vector<wire::Fact> t1;
+  t1.push_back(geo_fact(3, pos.v, 53.0, 158.0, 0, kOpenValid));
+  t1.push_back(f64_fact(3, mag.v, 4.8, 0, kOpenValid));
+  t1.push_back(sym_fact(3, label.v, place, 0, kOpenValid));
+  s.ingest(0, stage(s, t1), 1000);
+
+  // A correction, the way a feed adapter will have to issue one.
+  s.store().begin_txn(2000);
+  s.store().retract(FactId{1});
+  s.store().assert_fact(EntityId{3}, mag, Value::real(5.2), 0, kOpenValid, SourceId{0});
+  s.store().commit_txn();
+  s.finish_ingest();
+
+  const u32 sys = s.store().current_txn().v;
+  const std::string j = s.inspect_json(53.0, 158.0, 5000.0, 50, sys, "");
+
+  CHECK(has(j, "\"hit\":true"));
+  // A Sym value must come back as its text, not as a bare symbol id — the
+  // symbol table deliberately does not cross the boundary.
+  CHECK(has(j, "46 km E of Petropavlovsk"));
+  CHECK(has(j, "\"attr\":\"position\""));
+  // Both magnitudes appear in history; only the survivor in attributes.
+  CHECK(has(j, "4.8"));
+  CHECK(has(j, "5.2"));
+  CHECK(has(j, "\"history\":["));
+  CHECK(has(j, "\"attributes\":["));
 }

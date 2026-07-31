@@ -96,6 +96,14 @@ interface EngineExports {
   finishIngest(): void
   resolveEntities(geoAttr: number, scalarAttr: number): ErStats
   mergeEvidence(limit: number): string
+  inspect(
+    lat: number,
+    lon: number,
+    radiusM: number,
+    validAt: number,
+    sysAt: number,
+    geoAttrs: string,
+  ): string
   unmergePair(pairIndex: number): void
   benchScan(iterations: number): unknown
 }
@@ -251,6 +259,28 @@ export class Engine {
   /** Per-merge evidence as JSON — the derivation, not a summary. */
   mergeEvidence(limit = 25): string {
     return this.#x.mergeEvidence(limit)
+  }
+
+  /**
+   * Identifies the nearest visible point to a position, as JSON.
+   *
+   * `geoAttrs` is a comma-separated list of the geometry attribute ids the
+   * caller is currently DISPLAYING. The engine has no notion of a layer being
+   * switched off, so the view has to say — pass an empty string to accept any
+   * geometry.
+   *
+   * Note this takes a position, not a fact id: the engine picks the row itself,
+   * which keeps its unchecked row accessors unreachable from here.
+   */
+  inspect(
+    lat: number,
+    lon: number,
+    radiusM: number,
+    validAt: number,
+    sysAt: number,
+    geoAttrs: string,
+  ): string {
+    return this.#x.inspect(lat, lon, radiusM, validAt, sysAt, geoAttrs)
   }
 
   unmergePair(pairIndex: number): void {

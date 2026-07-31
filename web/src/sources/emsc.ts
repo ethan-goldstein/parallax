@@ -23,7 +23,7 @@
 // EMSC also publishes `lastupdate` separately from `time`, so like USGS it
 // carries its own system-time axis.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo } from '../engine/abi'
+import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import type { FactInput } from '../engine/engine'
 import { SOURCES } from './registry'
 import type { Batch, EntityRegistry } from './batch'
@@ -138,6 +138,7 @@ export function buildEmscBatches(
   events: readonly EmscEvent[],
   registry: EntityRegistry,
   attrs: EmscAttrs,
+  intern: (text: string) => number,
 ): Batch[] {
   const BUCKET_SECONDS = 60
   const byBucket = new Map<number, EmscEvent[]>()
@@ -198,6 +199,23 @@ export function buildEmscBatches(
           source,
           writePayload: (v, off) => writeF64Bits(v, off, e.depthKm),
         })
+
+        // `region` has been declared, interned and sensitivity-typed since this
+        // source was written, and threaded all the way into this function —
+        // without a single fact ever being written with it. It is now the label,
+        // which is what it was always for.
+        if (e.region.length > 0) {
+          const sym = intern(e.region)
+          facts.push({
+            entity,
+            attr: attrs.region,
+            kind: Kind.Sym,
+            validFrom,
+            validTo: OPEN_VALID,
+            source,
+            writePayload: (v, off) => writeSymBits(v, off, sym),
+          })
+        }
       }
 
       return { wallClockUnix: bucket, facts }
@@ -228,12 +246,17 @@ export const emscSpec: SourceSpec<{ events: EmscEvent[]; rejected: number }> = {
   fetch: (signal) => fetchEmsc(EMSC_URL, signal),
   normalize(raw, ctx) {
     return {
-      batches: buildEmscBatches(raw.events, ctx.registry, {
-        position: ctx.attrs.position!,
-        magnitude: ctx.attrs.magnitude!,
-        depth: ctx.attrs.depth!,
-        region: ctx.attrs.region!,
-      }),
+      batches: buildEmscBatches(
+        raw.events,
+        ctx.registry,
+        {
+          position: ctx.attrs.position!,
+          magnitude: ctx.attrs.magnitude!,
+          depth: ctx.attrs.depth!,
+          region: ctx.attrs.region!,
+        },
+        ctx.intern,
+      ),
       count: raw.events.length,
     }
   },
