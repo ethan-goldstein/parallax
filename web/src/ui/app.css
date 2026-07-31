@@ -818,7 +818,9 @@
 .bench {
   position: fixed;
   left: var(--s-6);
-  top: 84px;
+  /* Below the layer panel, which is also pinned left at 84px. Both at the same
+     top coordinate stacked the benchmark button on top of the layer rows. */
+  top: 212px;
   width: 20rem;
   z-index: 3;
   pointer-events: auto;
