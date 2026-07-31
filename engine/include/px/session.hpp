@@ -18,6 +18,7 @@
 #include "px/prelude.hpp"
 #include "px/er.hpp"
 #include "px/geo.hpp"
+#include "px/policy.hpp"
 #include "px/ql/plan.hpp"
 #include "px/store.hpp"
 #include "px/wire.hpp"
@@ -115,10 +116,40 @@ class Session {
     /// The EXPLAIN record as JSON. Small and human-readable, which is exactly
     /// when JSON across the boundary is the right choice.
     std::string explain;
+
+    /// A policy refusal is a RESULT, not an error. It is reported separately
+    /// from `error` because "you typed something invalid" and "you asked
+    /// something you are not authorised to ask" are different answers and the
+    /// UI must not conflate them.
+    bool denied = false;
+    std::string rule_id;
+    std::string denial_explanation;
+    std::string denial_offending;
+    std::string denial_remedy;
   };
 
   /// Parses, plans, executes, and packs the result for rendering.
   QueryOutcome run_query(std::string_view sql, i64 now_unix);
+
+  // ── policy and audit ─────────────────────────────────────────────────────
+
+  /// Declares why this session is querying. Every subsequent query is checked
+  /// against it and recorded with it.
+  bool set_purpose(std::string_view purpose_name);
+  [[nodiscard]] Purpose purpose() const noexcept { return policy_.purpose(); }
+
+  /// Types an attribute's sensitivity. Threaded through the ontology from the
+  /// start rather than bolted on, which is the difference between "the type
+  /// system carries sensitivity" and "I added a check".
+  void set_sensitivity(SymbolId attr, Sensitivity s) { policy_.set_sensitivity(attr, s); }
+
+  /// The audit trail, as JSON. Read back OUT of the bitemporal store, not from
+  /// a side list — so what is displayed is what was actually recorded.
+  [[nodiscard]] std::string audit_json(u32 limit = 50) const;
+
+  /// Appends one decision to the audit trail, as facts in the store.
+  void record_audit(std::string_view query, const PolicyDecision& decision,
+                    u32 rows_returned, i64 wall_clock_unix);
 
   /// Rebuilds every index after a run of ingest() calls.
   ///
@@ -185,6 +216,15 @@ class Session {
   u32 query_stamp_ = 0;
 
   GeoIndex geo_;
+
+  PolicyEngine policy_;
+
+  // Audit entities are allocated ABOVE every data entity so the two never
+  // collide, and lazily so the store's CSR index — which sizes itself to the
+  // largest entity id — is not forced to allocate a huge sparse array before
+  // any audit entry exists.
+  u32 next_audit_entity_ = 0;
+  u32 audit_count_ = 0;
 
   er::Resolution resolution_;
   /// Resolution works on dense record indices; this maps them back to the

@@ -44,6 +44,14 @@ export interface QueryResult {
   /** EXPLAIN record as JSON — small and human-readable, which is exactly when
    *  JSON across the boundary is the right call. */
   explain: string
+
+  /** A policy refusal, reported separately from `error` — a denial is a
+   *  result, not a syntax problem. */
+  denied: boolean
+  ruleId: string
+  denialExplanation: string
+  denialOffending: string
+  denialRemedy: string
 }
 
 export interface ErStats {
@@ -82,6 +90,9 @@ interface EngineExports {
   txnFactCount(i: number): number
   registerSource(name: string, geoAttr: number, scalarAttr: number): void
   runQuery(sql: string, nowUnix: number): QueryResult
+  setPurpose(name: string): boolean
+  setSensitivity(attr: number, level: number): void
+  auditLog(limit: number): string
   finishIngest(): void
   resolveEntities(geoAttr: number, scalarAttr: number): ErStats
   mergeEvidence(limit: number): string
@@ -192,6 +203,26 @@ export class Engine {
    */
   runQuery(sql: string, nowUnix = Math.floor(Date.now() / 1000)): QueryResult {
     return this.#x.runQuery(sql, nowUnix)
+  }
+
+  /**
+   * Declares why this session is querying.
+   *
+   * Returns false for an unknown purpose rather than defaulting to something
+   * permissive — a typo must not silently widen access.
+   */
+  setPurpose(name: string): boolean {
+    return this.#x.setPurpose(name)
+  }
+
+  /** 0 = public, 1 = precise, 2 = person-linked. */
+  setSensitivity(attr: number, level: 0 | 1 | 2): void {
+    this.#x.setSensitivity(attr, level)
+  }
+
+  /** The audit trail, read back out of the bitemporal store. */
+  auditLog(limit = 50): string {
+    return this.#x.auditLog(limit)
   }
 
   /**

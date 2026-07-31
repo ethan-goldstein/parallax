@@ -111,6 +111,16 @@ struct JsQueryResult {
   /// record is small and human-readable — the same choice would be wrong for
   /// the point buffer, which is why that travels as raw memory instead.
   std::string explain;
+
+  /// A refusal is reported separately from `error`: "you typed something
+  /// invalid" and "you asked something you are not authorised to ask" are
+  /// different answers, and a UI that conflates them tells the user to fix
+  /// their syntax when there is nothing wrong with it.
+  bool denied = false;
+  std::string ruleId;
+  std::string denialExplanation;
+  std::string denialOffending;
+  std::string denialRemedy;
 };
 
 void register_source(const std::string& name, u32 geo_attr, u32 scalar_attr) {
@@ -127,6 +137,11 @@ JsQueryResult run_query(const std::string& sql, double now_unix) {
   out.errorBegin = r.error_begin;
   out.errorEnd = r.error_end;
   out.explain = r.explain;
+  out.denied = r.denied;
+  out.ruleId = r.rule_id;
+  out.denialExplanation = r.denial_explanation;
+  out.denialOffending = r.denial_offending;
+  out.denialRemedy = r.denial_remedy;
   out.buffer = JsBufferRef{heap_addr(r.batch.data), r.batch.count,
                            static_cast<u32>(sizeof(px::wire::Point)), r.batch.generation,
                            r.batch.truncated};
@@ -150,6 +165,21 @@ JsErStats resolve_entities(u32 geo_attr, u32 scalar_attr) {
       session().resolve_entities(px::SymbolId{geo_attr}, px::SymbolId{scalar_attr});
   return JsErStats{s.records,        s.pairs_compared, s.pairs_accepted, s.clusters,
                    s.merged_records, s.blocks_skipped, s.elapsed_ms};
+}
+
+bool set_purpose(const std::string& name) {
+  return session().set_purpose(name);
+}
+
+void set_sensitivity(u32 attr, u32 level) {
+  const px::Sensitivity s = level >= 2   ? px::Sensitivity::PersonLinked
+                            : level == 1 ? px::Sensitivity::Precise
+                                         : px::Sensitivity::Public;
+  session().set_sensitivity(px::SymbolId{attr}, s);
+}
+
+std::string audit_log(u32 limit) {
+  return session().audit_json(limit);
 }
 
 void finish_ingest() {
@@ -233,7 +263,12 @@ EMSCRIPTEN_BINDINGS(parallax) {
       .field("error", &JsQueryResult::error)
       .field("errorBegin", &JsQueryResult::errorBegin)
       .field("errorEnd", &JsQueryResult::errorEnd)
-      .field("explain", &JsQueryResult::explain);
+      .field("explain", &JsQueryResult::explain)
+      .field("denied", &JsQueryResult::denied)
+      .field("ruleId", &JsQueryResult::ruleId)
+      .field("denialExplanation", &JsQueryResult::denialExplanation)
+      .field("denialOffending", &JsQueryResult::denialOffending)
+      .field("denialRemedy", &JsQueryResult::denialRemedy);
 
   emscripten::value_object<JsErStats>("ErStats")
       .field("records", &JsErStats::records)
@@ -244,6 +279,9 @@ EMSCRIPTEN_BINDINGS(parallax) {
       .field("blocksSkipped", &JsErStats::blocksSkipped)
       .field("elapsedMs", &JsErStats::elapsedMs);
 
+  emscripten::function("setPurpose", &set_purpose);
+  emscripten::function("setSensitivity", &set_sensitivity);
+  emscripten::function("auditLog", &audit_log);
   emscripten::function("finishIngest", &finish_ingest);
   emscripten::function("resolveEntities", &resolve_entities);
   emscripten::function("mergeEvidence", &merge_evidence);

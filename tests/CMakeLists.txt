@@ -35,6 +35,7 @@ add_executable(px_tests
   test_er.cpp
   test_geo.cpp
   test_plan.cpp
+  test_policy.cpp
   test_ql.cpp
   test_session.cpp
   test_store.cpp

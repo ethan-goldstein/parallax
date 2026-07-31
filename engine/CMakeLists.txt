@@ -12,6 +12,7 @@ add_library(px_core STATIC
   src/er.cpp
   src/geo.cpp
   src/graph.cpp
+  src/policy.cpp
   src/ql/lexer.cpp
   src/ql/parser.cpp
   src/ql/plan.cpp

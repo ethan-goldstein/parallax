@@ -12,6 +12,7 @@ import { fetchVessels, buildVesselBatches } from './sources/digitraffic'
 import { fetchEmsc, buildEmscBatches } from './sources/emsc'
 import { licenseObligations, SOURCES } from './sources/registry'
 import { buildBatches, EntityRegistry, fetchQuakes, USGS_FEEDS, type Batch } from './sources/usgs'
+import { renderAudit, type AuditLog } from './ui/audit'
 import { renderEvidence, type MergeEvidence } from './ui/evidence'
 import { renderExplain, type ExplainPlan } from './ui/explain'
 import { Scrubber } from './ui/scrubber'
@@ -29,7 +30,17 @@ app.innerHTML = `
       <span class="brand-mark">PARALLAX</span>
       <span class="brand-sub">bitemporal analytical engine</span>
     </div>
-    <div id="status" class="status hud-label">booting engine…</div>
+    <div class="hud-right">
+      <label class="purpose">
+        <span class="hud-label">purpose</span>
+        <select id="purpose">
+          <option value="demonstration">demonstration</option>
+          <option value="maritime-safety">maritime safety</option>
+          <option value="disaster-response">disaster response</option>
+        </select>
+      </label>
+      <div id="status" class="status hud-label">booting engine…</div>
+    </div>
   </header>
 
   <div class="query-bar">
@@ -41,6 +52,7 @@ app.innerHTML = `
 
   <section id="explain" class="explain"></section>
   <section id="evidence" class="evidence"></section>
+  <section id="audit" class="audit"></section>
 
   <aside class="hud panel layers" id="layers"></aside>
   <aside id="readout" class="hud panel readout" aria-live="polite"></aside>
@@ -109,6 +121,22 @@ async function main(): Promise<void> {
   engine.registerSource('quakes', attrs.position, attrs.magnitude)
   engine.registerSource('vessels', attrs.vesselPosition, attrs.speed)
   engine.registerSource('ships', attrs.vesselPosition, attrs.speed)
+
+  // A vessel's position locates a specific asset, so it is typed Precise.
+  // Seismic data is naturally public — an earthquake has no privacy interest,
+  // and a policy engine that pretended otherwise would be theatre.
+  engine.setSensitivity(attrs.vesselPosition, 1)
+  engine.setSensitivity(attrs.position, 0)
+
+  const purposeSelect = document.querySelector<HTMLSelectElement>('#purpose')!
+  purposeSelect.addEventListener('change', () => {
+    if (!engine.setPurpose(purposeSelect.value)) {
+      console.error('[parallax] unknown purpose', purposeSelect.value)
+    }
+    // Re-run so the effect of the declaration is immediate and visible.
+    if (queryInput.value.trim()) runQuery()
+    refreshAudit()
+  })
 
   const globe = new Globe({ container: stage, maxPoints: MAX_POINTS })
   // Amber → red for seismic energy; teal for maritime. Teal is the valid-time
@@ -399,9 +427,19 @@ async function main(): Promise<void> {
 
   let queryActive = false
 
+  function refreshAudit(): void {
+    const host = document.querySelector<HTMLElement>('#audit')
+    if (!host) return
+    try {
+      renderAudit(host, JSON.parse(engine.auditLog(20)) as AuditLog)
+    } catch (err) {
+      console.error('[parallax] audit log was not valid JSON', err)
+    }
+  }
+
   function clearQuery(): void {
     queryActive = false
-    queryInput.classList.remove('invalid')
+    queryInput.classList.remove('invalid', 'denied')
     queryError.hidden = true
     renderExplain(explainHost, null)
     refresh()
@@ -416,10 +454,33 @@ async function main(): Promise<void> {
 
     const result = engine.runQuery(sql)
 
+    // A policy refusal is NOT a syntax error. Conflating them would tell the
+    // user to fix their typing when there is nothing wrong with it — the
+    // query was understood perfectly and declined.
+    if (result.denied) {
+      queryActive = false
+      queryInput.classList.remove('invalid')
+      queryInput.classList.add('denied')
+      queryError.hidden = false
+      queryError.className = 'query-denial'
+      queryError.innerHTML = `
+        <div class="qd-head"><span class="qd-rule">${result.ruleId}</span> refused</div>
+        <div class="qd-why">${result.denialExplanation}</div>
+        <div class="qd-trigger">triggered by: ${result.denialOffending}</div>
+        <div class="qd-remedy">${result.denialRemedy}</div>`
+      globe.updateLayer('seismic', engine.heap.pointView(result.buffer), 0)
+      globe.updateLayer('maritime', engine.heap.pointView(result.buffer), 0)
+      renderExplain(explainHost, null)
+      refreshAudit()
+      return
+    }
+
     if (!result.ok) {
       queryActive = false
+      queryInput.classList.remove('denied')
       queryInput.classList.add('invalid')
       queryError.hidden = false
+      queryError.className = 'query-error'
 
       // The engine returns a byte span for the offending token, so point at it
       // rather than saying "syntax error" and leaving the user to hunt.
@@ -433,7 +494,7 @@ async function main(): Promise<void> {
     }
 
     queryActive = true
-    queryInput.classList.remove('invalid')
+    queryInput.classList.remove('invalid', 'denied')
     queryError.hidden = true
 
     // The result set is a single layer; the other is emptied so what is on
@@ -448,6 +509,7 @@ async function main(): Promise<void> {
       console.error('[parallax] EXPLAIN was not valid JSON', err)
     }
     renderExplain(explainHost, plan)
+    refreshAudit()
 
     const scan = engine.lastScan()
     readoutEl.innerHTML = [
@@ -481,7 +543,11 @@ async function main(): Promise<void> {
     baseRefresh()
   }
 
-  Object.assign(window, { __parallax: { engine, globe, scrubber, refresh, runQuery } })
+  refreshAudit()
+
+  Object.assign(window, {
+    __parallax: { engine, globe, scrubber, refresh, runQuery, refreshAudit },
+  })
 }
 
 void main()

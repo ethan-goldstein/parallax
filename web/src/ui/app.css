@@ -634,3 +634,181 @@
     display: none;
   }
 }
+
+/* ── purpose selector ────────────────────────────────────────────────────── */
+
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  pointer-events: auto;
+}
+
+.purpose {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.purpose select {
+  padding: 2px var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.purpose select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── policy denial ───────────────────────────────────────────────────────── */
+
+/* Deliberately distinct from .query-error. A refusal is not a syntax problem,
+   and styling them identically would tell the user to fix their typing when
+   the query was understood perfectly and declined. */
+.query-input.denied {
+  border-color: var(--deny);
+}
+
+.query-denial {
+  margin-top: var(--s-1);
+  padding: var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--deny) 50%, transparent);
+  border-left: 3px solid var(--deny);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+}
+
+.qd-head {
+  font-family: var(--font-mono);
+  color: var(--deny);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-hud);
+  margin-bottom: var(--s-2);
+}
+
+.qd-rule {
+  color: var(--ink);
+}
+
+.qd-why {
+  color: var(--ink);
+  margin-bottom: var(--s-2);
+}
+
+.qd-trigger {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  margin-bottom: var(--s-2);
+}
+
+/* Amber: the remedy is the actionable part, and amber is the interaction
+   colour everywhere else in the interface. */
+.qd-remedy {
+  color: var(--accent);
+}
+
+/* ── audit trail ─────────────────────────────────────────────────────────── */
+
+.audit {
+  position: fixed;
+  right: var(--s-6);
+  top: 84px;
+  width: 22rem;
+  max-height: 30vh;
+  overflow-y: auto;
+  z-index: 3;
+  pointer-events: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.audit:empty {
+  display: none;
+}
+
+.au-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.au-count {
+  color: var(--ink-dim);
+}
+
+.au-note {
+  padding: var(--s-1) var(--s-3) var(--s-2);
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--rule);
+}
+
+.au-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr auto;
+  gap: var(--s-2);
+  align-items: baseline;
+  padding: 3px var(--s-3);
+  font-size: var(--fs-micro);
+}
+
+.au-time {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
+
+.au-query {
+  font-family: var(--font-mono);
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.au-verdict {
+  font-family: var(--font-mono);
+  color: var(--valid-time);
+}
+
+.au-row.denied .au-verdict {
+  color: var(--deny);
+}
+
+.au-row.denied .au-query {
+  color: var(--ink);
+}
+
+.au-rule {
+  padding: 0 var(--s-3) var(--s-2) 5.3rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--deny);
+}
+
+/* The readout sits below the audit panel when both are present. */
+.readout {
+  top: auto;
+  bottom: 190px;
+}
+
+@media (max-width: 1180px) {
+  .audit {
+    display: none;
+  }
+  .readout {
+    top: 84px;
+    bottom: auto;
+  }
+}

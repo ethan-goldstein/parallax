@@ -7,6 +7,28 @@
 
 namespace px {
 
+namespace {
+
+void json_str(std::string& out, std::string_view v) {
+  out += '"';
+  for (const char c : v) {
+    if (c == '"') out += "\\\"";
+    else if (c == '\\') out += "\\\\";
+    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
+    else out += c;
+  }
+  out += '"';
+}
+
+void json_num(std::string& out, f64 v) {
+  char buf[48];
+  std::snprintf(buf, sizeof(buf), "%.4g", v);
+  out += buf;
+}
+
+}  // namespace
+
+
 Session::Session(u32 max_points) : point_capacity_(max_points) {
   // Allocated once, at full capacity, and never resized again.
   //
@@ -121,6 +143,126 @@ void Session::rebuild_geo_index() {
   geo_.build();
 }
 
+bool Session::set_purpose(std::string_view name) {
+  Purpose p{};
+  if (!parse_purpose(name, p)) return false;
+  policy_.set_purpose(p);
+  return true;
+}
+
+void Session::record_audit(std::string_view query, const PolicyDecision& decision,
+                           u32 rows_returned, i64 wall_clock_unix) {
+  // Audit entries are written as ORDINARY FACTS into the same bitemporal
+  // store as the data.
+  //
+  // Not a convenience. It means the audit trail is append-only for the same
+  // structural reason the data is, it time-travels with the same scrubber, and
+  // "what did this system do, and when did we know it" is answerable by the
+  // machinery being demonstrated. The store proving itself on its own audit
+  // trail is the point.
+  if (next_audit_entity_ == 0) {
+    // Allocate above every data entity, lazily. The store's CSR index sizes
+    // itself to the largest entity id, so picking a fixed high base (0xF0000000)
+    // would force a four-billion-entry allocation the moment anything was
+    // logged.
+    u32 max_entity = 0;
+    for (u32 i = 0; i < static_cast<u32>(store_.fact_count()); ++i) {
+      max_entity = std::max(max_entity, store_.fact_entity(FactId{i}).v);
+    }
+    next_audit_entity_ = max_entity + 1;
+  }
+
+  const SymbolId a_query = store_.symbols().intern("audit_query");
+  const SymbolId a_purpose = store_.symbols().intern("audit_purpose");
+  const SymbolId a_rule = store_.symbols().intern("audit_rule");
+  const SymbolId a_allowed = store_.symbols().intern("audit_allowed");
+  const SymbolId a_rows = store_.symbols().intern("audit_rows");
+
+  const EntityId e{next_audit_entity_++};
+  const Timestamp now = from_unix(wall_clock_unix);
+
+  store_.begin_txn(wall_clock_unix, store_.symbols().intern("audit"));
+  store_.assert_fact(e, a_query, Value::symbol(store_.symbols().intern(query)), now,
+                     kOpenValid, SourceId{0xFFFF});
+  store_.assert_fact(e, a_purpose,
+                     Value::symbol(store_.symbols().intern(purpose_name(policy_.purpose()))),
+                     now, kOpenValid, SourceId{0xFFFF});
+  store_.assert_fact(e, a_rule, Value::symbol(store_.symbols().intern(decision.rule_id)),
+                     now, kOpenValid, SourceId{0xFFFF});
+  store_.assert_fact(e, a_allowed, Value::boolean(decision.allowed), now, kOpenValid,
+                     SourceId{0xFFFF});
+  store_.assert_fact(e, a_rows, Value::integer(rows_returned), now, kOpenValid,
+                     SourceId{0xFFFF});
+  store_.commit_txn();
+
+  ++audit_count_;
+}
+
+std::string Session::audit_json(u32 limit) const {
+  // Read back OUT of the store rather than from a side list, so what is
+  // displayed is what was actually recorded. A side list could drift from the
+  // store, and an audit trail that might differ from the record is not one.
+  const SymbolId a_query = store_.symbols().find("audit_query");
+  if (!a_query.valid()) return "{\"entries\":[]}";
+
+  const SymbolId a_purpose = store_.symbols().find("audit_purpose");
+  const SymbolId a_rule = store_.symbols().find("audit_rule");
+  const SymbolId a_allowed = store_.symbols().find("audit_allowed");
+  const SymbolId a_rows = store_.symbols().find("audit_rows");
+
+  struct Entry {
+    std::string query, purpose, rule;
+    bool allowed = true;
+    i64 rows = 0;
+    i64 when = 0;
+  };
+  std::vector<Entry> entries;
+
+  for (u32 i = 0; i < static_cast<u32>(store_.fact_count()); ++i) {
+    const FactId f{i};
+    if (store_.fact_attr(f) != a_query) continue;
+
+    Entry e;
+    e.when = to_unix(store_.fact_valid_from(f));
+    e.query = std::string(store_.symbols().text(store_.fact_value(f).as_symbol()));
+
+    const EntityId owner = store_.fact_entity(f);
+    for (u32 j = i; j < static_cast<u32>(store_.fact_count()); ++j) {
+      const FactId g{j};
+      if (store_.fact_entity(g) != owner) continue;
+      const SymbolId attr = store_.fact_attr(g);
+      const Value v = store_.fact_value(g);
+      if (attr == a_purpose) e.purpose = std::string(store_.symbols().text(v.as_symbol()));
+      else if (attr == a_rule) e.rule = std::string(store_.symbols().text(v.as_symbol()));
+      else if (attr == a_allowed) e.allowed = v.as_bool();
+      else if (attr == a_rows) e.rows = v.as_i64();
+    }
+    entries.push_back(std::move(e));
+  }
+
+  // Newest first, capped.
+  std::string s = "{\"entries\":[";
+  u32 emitted = 0;
+  for (usize k = entries.size(); k-- > 0 && emitted < limit;) {
+    const Entry& e = entries[k];
+    if (emitted) s += ',';
+    s += "{\"query\":";
+    json_str(s, e.query);
+    s += ",\"purpose\":";
+    json_str(s, e.purpose);
+    s += ",\"rule\":";
+    json_str(s, e.rule);
+    s += ",\"allowed\":";
+    s += e.allowed ? "true" : "false";
+    s += ",\"rows\":" + std::to_string(e.rows);
+    s += ",\"when\":" + std::to_string(e.when);
+    s += '}';
+    ++emitted;
+  }
+  s += "]}";
+  return s;
+}
+
 er::ErStats Session::resolve_entities(SymbolId geo_attr, SymbolId scalar_attr) {
   const Timestamp valid_at = kTimeMax - 1;  // "everything that has happened"
   const u32 sys_at = store_.current_txn().v;
@@ -186,26 +328,6 @@ void Session::unmerge_pair(u32 pair_index) {
   er::unmerge(resolution_, pair_index);
 }
 
-namespace {
-
-void json_str(std::string& out, const std::string& v) {
-  out += '"';
-  for (const char c : v) {
-    if (c == '"') out += "\\\"";
-    else if (c == '\\') out += "\\\\";
-    else if (static_cast<unsigned char>(c) < 0x20) out += ' ';
-    else out += c;
-  }
-  out += '"';
-}
-
-void json_num(std::string& out, f64 v) {
-  char buf[48];
-  std::snprintf(buf, sizeof(buf), "%.4g", v);
-  out += buf;
-}
-
-}  // namespace
 
 std::string Session::merge_evidence_json(u32 limit) const {
   std::string s;
@@ -309,6 +431,47 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
     return out;
   }
 
+  // ── policy check ─────────────────────────────────────────────────────────
+  //
+  // AFTER planning, BEFORE execution. That ordering is the whole design: the
+  // rule needs the plan's cardinality estimate to tell "describe a population"
+  // from "identify one asset", and a check that ran after execution would
+  // already have done the thing it is about to refuse.
+  PolicyRequest preq;
+  preq.queried_attr = binding->geo_attr;
+  preq.estimated_entities = plan.nodes[plan.root].est_rows;
+  preq.has_identity_predicate = false;
+  preq.has_spatial_bound = pr.query.within.present || pr.query.bbox.present;
+  preq.spatial_extent_m = pr.query.within.present ? pr.query.within.distance_m : 0.0;
+
+  // A filter comparing an identifier for equality is narrowing by identity
+  // rather than by region — the distinction R1 turns on.
+  if (pr.query.filter_root != ql::kNoNode) {
+    for (const ql::Node& n : pr.query.nodes) {
+      if (n.kind != ql::NodeKind::Compare) continue;
+      if (n.op != ql::CmpOp::Eq) continue;
+      const std::string& field = pr.query.str(pr.query.nodes[n.lhs].str);
+      if (field == "mmsi" || field == "id" || field == "callsign" || field == "imo") {
+        preq.has_identity_predicate = true;
+      }
+    }
+  }
+
+  const PolicyDecision decision = policy_.check(preq);
+  if (!decision.allowed) {
+    out.denied = true;
+    out.rule_id = decision.rule_id;
+    out.denial_explanation = decision.explanation;
+    out.denial_offending = decision.offending;
+    out.denial_remedy = decision.remedy;
+    out.explain = ql::explain_json(plan);
+
+    // A refused query is still an event worth recording — arguably more so
+    // than an allowed one.
+    record_audit(sql, decision, 0, now_unix);
+    return out;
+  }
+
   scratch_.clear();
   {
     ScopedTimer timer(last_query_ms_);
@@ -364,6 +527,17 @@ Session::QueryOutcome Session::run_query(std::string_view sql, i64 now_unix) {
   out.batch = PointBatch{points_.data(), written, generation_, truncated};
   out.explain = ql::explain_json(plan);
   out.ok = true;
+
+  // Allowed queries are audited too, with the row count.
+  //
+  // Recording only refusals is the mistake that makes an audit trail useless:
+  // an access log that lists solely the times access was blocked cannot answer
+  // "what did this system actually show, and to whom" — which is the question
+  // an audit exists for. The first version of this did exactly that, and the
+  // test asserting "every query is recorded" is what caught it.
+  //
+  // Written after the result is packed, so the row count is the real one.
+  record_audit(sql, decision, written, now_unix);
   return out;
 }
 
