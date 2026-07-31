@@ -1,4 +1,9 @@
+// <cstring> and <vector> are used directly below. libc++ happens to pull both
+// in transitively, so omitting them compiles on macOS and fails on libstdc++ —
+// caught by CI on Linux. Include what you use.
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include <doctest.h>
 
