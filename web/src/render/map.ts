@@ -276,6 +276,9 @@ export class Globe {
 
   #disposed = false
 
+  /** Set if layer attachment threw. Surfaced through renderFault. */
+  #attachFault: string | null = null
+
   constructor(opts: GlobeOptions) {
     this.#maxPoints = opts.maxPoints
     void this.#init(opts)
@@ -331,14 +334,37 @@ export class Globe {
     // to be loaded, so it reads false immediately after construction even when
     // the style itself is ready. Hence `styledata` as well, which fires
     // repeatedly and catches the case the other two miss.
-    const attach = (): void => this.#onStyleLoaded()
+    // Attachment now runs inside the render handler, so it must not be able to
+    // throw: MapLibre can still reject addLayer after the stylesheet parses, and
+    // an exception escaping a render listener kills the frame — which is the
+    // precise failure this whole change exists to eliminate. Record and stop
+    // retrying instead.
+    const attach = (): void => {
+      try {
+        this.#onStyleLoaded()
+      } catch (err) {
+        this.#attachFault = err instanceof Error ? err.message : String(err)
+        this.#ready = true // stop retrying; renderFault now reports the reason
+        console.error('[parallax] could not attach data layers', err)
+      }
+    }
     if (styleIsParsed(map)) attach()
     else {
       map.once('style.load', attach)
       map.on('styledata', attach)
     }
 
-    map.on('render', () => this.#tick())
+    map.on('render', () => {
+      // The guarantee. `render` fires for as long as the map exists and cannot
+      // be missed the way a one-shot event can, so attachment is retried here
+      // until it succeeds. The two listeners above only make it happen sooner.
+      //
+      // `styleIsParsed` serialises the stylesheet, which is far too expensive to
+      // do every frame — hence the `#ready` guard, which makes this free the
+      // moment the layers are on and forever after.
+      if (!this.#ready) attach()
+      this.#tick()
+    })
     this.#bindPicking(map)
 
     // Feed failures are surfaced in the layer panel; a basemap or tile failure
@@ -421,6 +447,7 @@ export class Globe {
    * feeds returned no data", and the two have completely different fixes.
    */
   get renderFault(): string | null {
+    if (this.#attachFault) return `layer attach failed: ${this.#attachFault}`
     if (!this.#map) return 'basemap style did not load'
     if (!this.#ready) return 'style loaded but layers not attached'
     for (const [name, layer] of this.#layers) {
