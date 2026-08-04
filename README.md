@@ -20,6 +20,15 @@ rather than what happened. Same instant, less knowledge — which is the questio
 has after a magnitude is revised from 4.8 to 5.2 six hours late, and which no dashboard that
 overwrites values in place can answer at all.
 
+[![The same instant, at two points on the system axis](docs/images/system-time-comparison.png)](docs/images/system-time-comparison.png)
+
+<sub>**The same instant, rendered twice.** Both frames are valid-time `2026-08-06 15:00Z` — the
+identical moment in the world. The left is that moment as known at transaction 934; the right, at
+transaction 3,114. **1,151 points against 5,712.** Both frames are reading one unchanged store —
+`36,578` facts, `13,527` entities, `1623 KB` in each. Nothing was deleted to produce the left and
+nothing was added to produce the right — the difference is entirely *when you asked*. Click to
+enlarge. Captured from the deployed site by [`scripts/capture-comparison.mjs`](scripts/capture-comparison.mjs).</sub>
+
 Underneath is a bitemporal columnar store and a cost-based query planner, **written in C++20 and
 compiled to WebAssembly**. It plans each query, shows the access path it chose and where its own row
 estimate was wrong, and **refuses questions** that narrow to a single identifiable asset — before
