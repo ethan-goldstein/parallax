@@ -262,13 +262,9 @@ export const LAYERS: readonly LayerDef[] = [
       // `~` first, and deliberately so: the label is "callsign · type", so an
       // equality test against a bare callsign matches nothing.
       //
-      // Worth knowing while reading policy.cpp: R1-individual-narrowing fires on
-      // the field NAMES `mmsi`, `id`, `callsign` and `imo`, and no source
-      // declares any of them — this layer's identity-ish attribute is
-      // `aircraft_label`. So the rule is reachable from the console by naming a
-      // field that does not exist, but not from real data. Making it fire on the
-      // data would mean declaring identity on AttrDecl the way sensitivity
-      // already is, rather than matching a string in the query text.
+      // An equality test on it is also what R1-individual-narrowing refuses:
+      // `aircraft_label` is declared `identifying` in airplanes.ts, which is
+      // how the rule reaches real data rather than a hardcoded field name.
       { attr: 'aircraft_label', label: 'callsign / type', kind: 'text', ops: ['~', '='] },
     ],
     spatialHint: { defaultRadiusKm: 400, examplePoint: [51.5, 0.0], exampleLabel: 'London' },

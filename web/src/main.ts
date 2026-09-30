@@ -190,9 +190,10 @@ async function main(): Promise<void> {
     for (const c of populated) {
       const host = dockEl.querySelector<HTMLElement>(`[data-obligations="${c}"]`)
       if (!host) continue
-      const ids = feeds
-        .filter((f) => f.count > 0 && f.category === c)
-        .map((f) => SOURCES[f.key]!.id)
+      // By source id, not by spec key: two specs can share one licence, and a
+      // spec key that is not a SOURCES key used to throw here the moment the
+      // civil layer first had data, aborting the cycle that delivered it.
+      const ids = feeds.filter((f) => f.count > 0 && f.category === c).map((f) => f.source)
       const notes = [...licenseObligations(ids), ...basemapTerms]
       host.innerHTML = notes.length
         ? `<div class="panel-title hud-label">obligations</div>` +
@@ -747,6 +748,7 @@ async function main(): Promise<void> {
             ...feeds,
             {
               key,
+              source: SOURCES.recon!.id,
               label: 'lookups · recon',
               layer: 'recon',
               category: 'network',

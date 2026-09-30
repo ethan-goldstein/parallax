@@ -190,13 +190,20 @@ export function renderLayerPanel(opts: LayerPanelOptions): void {
           ? sources
               .map((s) => {
                 const rate = cadence(timings?.get(s.key), now)
+                // The failure reason gets its own line, in full. It used to be
+                // truncated to 24 characters in the count column, which turned
+                // "no ADS-B relay in this build: airplanes.live withdrew…" into
+                // "no ADS-B relay in this b" and left the viewer to guess.
+                const why = s.error
+                  ? `<div class="layer-note layer-why">${escapeHtml(s.error)}</div>`
+                  : ''
                 return `<div class="layer-src ${s.error ? 'dead' : ''}">
                     <span>${escapeHtml(s.label.split('·').pop()?.trim() ?? s.label)}</span>
                     <span class="${s.error ? 'bad' : ''}">${
-                      s.error ? escapeHtml(s.error.slice(0, 24)) : s.count.toLocaleString()
+                      s.error ? 'failed' : s.count.toLocaleString()
                     }</span>
                     ${rate ? `<span class="layer-rate">${escapeHtml(rate)}</span>` : ''}
-                  </div>`
+                  </div>${why}`
               })
               .join('')
           : sources

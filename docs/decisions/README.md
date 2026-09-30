@@ -12,6 +12,7 @@ than rediscovered from the code. Each says what was decided, what it cost, and w
 | [0005](0005-maplibre-as-renderer-host.md) | MapLibre hosts the renderer; the zero-copy path stays | 9 |
 | [0006](0006-the-scrubber-owns-both-axes.md) | The scrubber owns both axes; the engine takes them as parameters | 10 |
 | [0007](0007-recon-lookups-are-facts.md) | Network lookups are ingested as facts, not rendered in a panel | 10 |
+| [0008](0008-one-relay-one-snapshot.md) | One relay for the aircraft feed, one snapshot for the element sets | 11 |
 
 0001, 0003 and 0004 are a chain: system time is monotone and a Z-order range is contiguous, which
 makes two of the four cardinality estimators exact, which is the only reason refusing a query

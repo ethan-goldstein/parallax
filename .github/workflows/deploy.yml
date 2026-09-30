@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Daily, so the CelesTrak element-set snapshot the build embeds is never more
+  # than a day old. See web/scripts/fetch-tle.mjs for why it is a snapshot at
+  # all. Nothing else about the site changes on this schedule.
+  schedule:
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -40,8 +45,20 @@ jobs:
       - run: npm ci
         working-directory: web
 
+      # Fail-soft by design: if CelesTrak does not answer, the script keeps
+      # whatever snapshot exists and the client falls back to a live fetch.
+      # A deploy that fails because a third party was down for a minute is
+      # worse than a deploy carrying yesterday's element sets.
+      - name: Fetch the element-set snapshot
+        run: npm run build:tle
+        working-directory: web
+
       - run: npm run build
         working-directory: web
+        env:
+          # The ADS-B relay's URL, from a repository variable. Unset means the
+          # aviation layers report that no relay is configured. See relay/.
+          VITE_ADSB_RELAY: ${{ vars.ADSB_RELAY }}
 
       # GitHub Pages serves 404.html for unknown paths. Copying index.html over
       # it makes client-side routing survive a hard refresh on a deep link,

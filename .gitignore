@@ -18,6 +18,11 @@ web/public/wasm/parallax.wasm.map
 data/snapshots/*.ndjson
 data/snapshots/*.raw.json
 
+# The CelesTrak element-set snapshot. Written by `npm run build:tle`, and by
+# the Pages deploy before every build, so it is never committed: a committed
+# copy would go stale in the repo while looking current on the site.
+web/public/tle/
+
 # Tooling
 compile_commands.json
 .cache/

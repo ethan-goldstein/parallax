@@ -205,8 +205,14 @@ export interface SourceSpec<Raw = unknown> {
   /** Shown in the layer panel where coverage is not what a viewer would assume. */
   coverageNote?: string
   fetch(signal?: AbortSignal, view?: Viewport): Promise<Raw>
-  /** Records → facts. Must not ingest; the scheduler owns transaction order. */
-  normalize(raw: Raw, ctx: NormalizeContext): { batches: Batch[]; count: number }
+  /**
+   * Records → facts. Must not ingest; the scheduler owns transaction order.
+   *
+   * `note`, when returned, replaces `coverageNote` for this cycle. It is for
+   * the one thing a static note cannot say: something the fetch itself learned,
+   * such as which snapshot the element sets came from and when it was taken.
+   */
+  normalize(raw: Raw, ctx: NormalizeContext): { batches: Batch[]; count: number; note?: string }
 
   /**
    * Seconds between refetches. Absent means fetched once, at boot.
@@ -279,6 +285,16 @@ export interface SourceSpec<Raw = unknown> {
 /** Per-source outcome for one ingest cycle. Reported, never silently dropped. */
 export interface FeedStatus {
   key: string
+  /**
+   * The SOURCES id this feed writes facts under, for the licence panel.
+   *
+   * Carried here rather than looked up by `key`, because a spec's key is a
+   * scheduler identity and a SOURCES key is a licence identity, and two specs
+   * can share one licence (the two aviation layers do). Looking licences up by
+   * spec key threw the first time the civil layer had data, which aborted the
+   * poll cycle that delivered it.
+   */
+  source: number
   label: string
   layer: string
   category: Category

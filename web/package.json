@@ -11,7 +11,8 @@
     "typecheck": "tsc -b --pretty",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:assets": "node scripts/build-nws-zones.mjs"
+    "build:assets": "node scripts/build-nws-zones.mjs",
+    "build:tle": "node scripts/fetch-tle.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

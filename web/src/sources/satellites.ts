@@ -52,6 +52,29 @@ import { Sensitivity, type SourceSpec } from './spec'
 const CT = 'https://celestrak.org/NORAD/elements/gp.php?FORMAT=tle&GROUP='
 
 /**
+ * The same four groups, as a same-origin snapshot written by
+ * `npm run build:tle` and refreshed by the daily Pages deploy.
+ *
+ * ── why the snapshot comes first ──────────────────────────────────────────
+ *
+ * This source fetched CelesTrak live from every visitor's browser, four
+ * requests per page load. CelesTrak asks for no more than one fetch per group
+ * every two hours and blocks addresses that ignore it, and element sets are
+ * only re-determined a few times a day, so the live fetch was costing a
+ * one-person site goodwill to buy nothing a daily snapshot does not provide.
+ *
+ * Bitemporally it is a wash: system time is the TLE EPOCH, read from the
+ * element set, not the moment anything was fetched. Live or snapshot, the same
+ * epoch lands in the same place on the axis. The panel says which one it was
+ * and when the snapshot was taken, because that is the one thing a viewer
+ * cannot read off the axis.
+ *
+ * The live path survives as the fallback for a build with no snapshot in it,
+ * which is a fresh clone that has not run the script.
+ */
+const SNAPSHOT_DIR = 'tle/'
+
+/**
  * A demonstration set, not a catalogue.
  *
  * Four groups, roughly five hundred objects. The full catalogue is over thirty
@@ -59,6 +82,8 @@ const CT = 'https://celestrak.org/NORAD/elements/gp.php?FORMAT=tle&GROUP='
  * render as a solid shell — impressive for one screenshot and useless as an
  * instrument. Stations and the navigation constellations are the objects a
  * viewer can actually recognise.
+ *
+ * Must match GROUPS in scripts/fetch-tle.mjs.
  */
 const GROUPS = ['stations', 'gps-ops', 'science', 'visual'] as const
 
@@ -76,6 +101,37 @@ export interface SatelliteFetch {
   sats: SatelliteRecord[]
   /** TLE lines that would not parse. Reported, never silently skipped. */
   rejected: number
+  /** Where the element sets came from: the build's snapshot, or CelesTrak live. */
+  origin: { kind: 'snapshot'; fetchedAt: string; partial: boolean } | { kind: 'live' }
+}
+
+interface SnapshotManifest {
+  fetchedAt: string
+  partial?: boolean
+  groups: Record<string, { records: number }>
+}
+
+/**
+ * The snapshot's manifest, or null when this build has none.
+ *
+ * A 404 is the expected answer on a fresh clone and is not an error; anything
+ * else that goes wrong reading the manifest is treated the same way, because
+ * the live fetch is a complete fallback and there is nothing to gain from
+ * failing the layer over a broken manifest.
+ */
+async function loadManifest(signal?: AbortSignal): Promise<SnapshotManifest | null> {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}${SNAPSHOT_DIR}manifest.json`, {
+      ...(signal ? { signal } : {}),
+      cache: 'no-cache',
+    })
+    if (!res.ok) return null
+    const m = (await res.json()) as Partial<SnapshotManifest>
+    if (typeof m.fetchedAt !== 'string' || typeof m.groups !== 'object' || !m.groups) return null
+    return m as SnapshotManifest
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -93,13 +149,26 @@ function epochUnixOf(satrec: SatRec): number {
 }
 
 export async function fetchSatellites(signal?: AbortSignal): Promise<SatelliteFetch> {
+  const manifest = await loadManifest(signal)
+
+  // Only the groups the manifest says exist. A group the snapshot is missing
+  // is not fetched live to fill the gap: mixing one live group into a dated
+  // snapshot would make "fetched at" untrue for part of the layer.
+  const groups = manifest ? GROUPS.filter((g) => g in manifest.groups) : GROUPS
+  const base = manifest ? `${import.meta.env.BASE_URL}${SNAPSHOT_DIR}` : CT
+  const suffix = manifest ? '.txt' : ''
+
   const texts = await Promise.all(
-    GROUPS.map(async (g) => {
-      const res = await fetch(`${CT}${g}`, signal ? { signal } : {})
-      if (!res.ok) throw new Error(`celestrak ${g} ${res.status}`)
+    groups.map(async (g) => {
+      const res = await fetch(`${base}${g}${suffix}`, signal ? { signal } : {})
+      if (!res.ok) throw new Error(`${manifest ? 'snapshot' : 'celestrak'} ${g} ${res.status}`)
       return res.text()
     }),
   )
+
+  const origin: SatelliteFetch['origin'] = manifest
+    ? { kind: 'snapshot', fetchedAt: manifest.fetchedAt, partial: manifest.partial === true }
+    : { kind: 'live' }
 
   const sats: SatelliteRecord[] = []
   const seen = new Set<string>()
@@ -135,7 +204,21 @@ export async function fetchSatellites(signal?: AbortSignal): Promise<SatelliteFe
     }
   }
 
-  return { sats, rejected }
+  return { sats, rejected, origin }
+}
+
+/**
+ * The coverage note, with where the element sets came from and when.
+ *
+ * `2026-09-30 03:17Z`, not a relative "14 hours ago": a relative age is only
+ * true at the instant it was rendered, and this note is written once per fetch
+ * and read for the next six hours.
+ */
+function originNote(origin: SatelliteFetch['origin']): string {
+  const stem = 'positions are PROPAGATED from element sets, not observed — they sit above the scrubber diagonal for that reason'
+  if (origin.kind === 'live') return `${stem} · element sets fetched live from CelesTrak`
+  const at = origin.fetchedAt.replace('T', ' ').replace(/:\d\d(\.\d+)?(Z|[+-]\d\d:?\d\d)$/, 'Z')
+  return `${stem} · element-set snapshot ${at}${origin.partial ? ' (some groups older)' : ''}`
 }
 
 interface SatelliteAttrs {
@@ -240,7 +323,8 @@ export const satellitesSpec: SourceSpec<SatelliteFetch> = {
     note: 'orbital elements propagated to the requested instant; nothing here was measured',
   },
   // Element sets are re-determined a few times a day; refetching faster returns
-  // the same TLEs, which the duplicate guard would drop anyway.
+  // the same TLEs, which the duplicate guard would drop anyway. Against the
+  // snapshot this is a same-origin fetch and costs CelesTrak nothing.
   pollSeconds: 21_600,
   // Re-propagated from the cached element sets far more often than they are
   // refetched. This is the only kind of source for which recomputing is
@@ -266,6 +350,7 @@ export const satellitesSpec: SourceSpec<SatelliteFetch> = {
         Math.floor(Date.now() / 1000),
       ),
       count: raw.sats.length,
+      note: originNote(raw.origin),
     }
   },
 }

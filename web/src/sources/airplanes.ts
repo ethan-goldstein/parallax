@@ -1,41 +1,64 @@
 // ── web/src/sources/airplanes.ts ────────────────────────────────────────────
-// airplanes.live — military ADS-B, global.
+// ADS-B, through the relay in relay/worker.js. Military globally, civil by
+// viewport.
 //
-//   https://api.airplanes.live/v2/mil
-//   Community-run aggregator of volunteer ADS-B receivers. Keyless, CORS-open.
-//   Informal terms, non-commercial — see SOURCES.airplanes_live.
+// ── why there is a relay ────────────────────────────────────────────────────
 //
-// This closes a loop the registry left open: `airplanes_live` has been reserved
-// as source id 2 since Phase 4 and never fetched.
+// This file used to read airplanes.live directly: keyless, CORS-open, one
+// request for every self-declared military aircraft on the planet. In 2026
+// airplanes.live withdrew anonymous access (the API now answers 403 and asks
+// for an email), and every other community aggregator (adsb.fi, adsb.lol,
+// adsb.one, OpenSky) serves JSON without an Access-Control-Allow-Origin
+// header. Checked from the deployed origin, not assumed: all five fail in the
+// browser. There is no keyless ADS-B feed a static page can read.
 //
-// ── why the military endpoint and not everything ───────────────────────────
+// The relay is the smallest honest answer: a stateless Cloudflare Worker that
+// forwards two fixed paths to adsb.fi (adsb.lol as fallback) and adds the CORS
+// header. It holds no key and stores nothing. The README says so plainly,
+// because "no backend" was the project's opening claim and it is now true for
+// every layer but this one.
 //
-// Partly practical: there is no global "all aircraft" endpoint, only radius
-// queries, so worldwide civil coverage would mean dozens of requests per refresh
-// against a volunteer-funded service. `/v2/mil` is one request for the whole
-// planet.
+// Its URL comes from VITE_ADSB_RELAY at build time. Without it this source
+// does not fetch anything: it reports, in the layer panel, that no relay is
+// configured and why one is needed. An empty sky that looks like a broken
+// layer is the failure this project spends its layer panel arguing against.
 //
-// Mostly editorial. This is the layer where an OSINT dashboard is most tempted
-// to overreach, so the boundary is worth stating: aircraft are rendered by
-// ICAO hex, callsign and type, all of which the aircraft itself broadcasts in
-// the clear. There is no registration lookup, no owner resolution, and no
-// linking to an operator or a person. "Where is this open-data aircraft" is a
-// question about a machine; "whose aircraft is this and where has it been" is
-// a question about a person, and the README's refusal to track named
-// individuals covers the second one.
+// ── what the data is, and is not ────────────────────────────────────────────
 //
-// ── system time ────────────────────────────────────────────────────────────
+// This is the layer where an OSINT dashboard is most tempted to overreach, so
+// the boundary is worth stating: aircraft are rendered by ICAO hex, callsign
+// and type, all of which the aircraft itself broadcasts in the clear. There is
+// no registration lookup, no owner resolution, and no linking to an operator
+// or a person. "Where is this open-data aircraft" is a question about a
+// machine; "whose aircraft is this and where has it been" is a question about
+// a person, and the README's refusal to track named individuals covers it.
+//
+// ── system time ─────────────────────────────────────────────────────────────
 //
 // A position report has one timestamp. There is no separate "revised at", so
-// like AIS these facts sit on the scrubber's diagonal: `seen_pos` seconds ago is
-// both when it was true and when we learned it.
+// like AIS these facts sit on the scrubber's diagonal: `seen_pos` seconds ago
+// is both when it was true and when we learned it.
 // ────────────────────────────────────────────────────────────────────────────
-import { Kind, OPEN_VALID, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
+import { Kind, toTimestamp, writeF64Bits, writeGeo, writeSymBits } from '../engine/abi'
 import { bucketBatches, type Batch, type EntityRegistry } from './batch'
 import { SOURCES } from './registry'
 import { Sensitivity, type SourceSpec, type Viewport } from './spec'
 
-export const AIRPLANES_MIL_URL = 'https://api.airplanes.live/v2/mil'
+/**
+ * Base URL of the relay, or undefined when the build was made without one.
+ *
+ * Read once, at module load, from a build-time variable rather than from the
+ * page: the relay's Origin allowlist is the deployed site, so a URL that could
+ * be changed at runtime would only ever point at something that refuses us.
+ */
+export const ADSB_RELAY: string | undefined = (() => {
+  const raw = (import.meta.env.VITE_ADSB_RELAY as string | undefined)?.trim()
+  return raw ? raw.replace(/\/+$/, '') : undefined
+})()
+
+export const NO_RELAY =
+  'no ADS-B relay in this build: airplanes.live withdrew keyless access in 2026 and no ' +
+  'aggregator sends CORS headers, so a static page cannot read any of them (see relay/)'
 
 export interface Aircraft {
   /** ICAO 24-bit address, as broadcast. */
@@ -50,19 +73,59 @@ export interface Aircraft {
   timeUnix: number
 }
 
+export interface AircraftFetch {
+  aircraft: Aircraft[]
+  rejected: number
+  /** Which aggregator the relay actually got its answer from, if it said. */
+  upstream: string | null
+}
+
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-export async function fetchMilitaryAircraft(
-  url: string = AIRPLANES_MIL_URL,
-  signal?: AbortSignal,
-): Promise<{ aircraft: Aircraft[]; rejected: number }> {
-  const res = await fetch(url, signal ? { signal } : {})
-  if (!res.ok) throw new Error(`airplanes.live returned ${res.status} ${res.statusText}`)
+/**
+ * How long one position report is asserted to hold, in seconds.
+ *
+ * It used to be open-ended, which asserted that an aircraft seen at 14:00:00
+ * was still there at 14:10 and would be there forever: every poll added a new
+ * point beside the last, and after ten minutes each aircraft trailed thirty
+ * stale copies of itself. Thirty seconds is one poll interval plus slack:
+ * every instant is covered by the report that preceded it, at most two reports
+ * overlap, and a report the feed has stopped renewing drops off the map rather
+ * than sitting where the aircraft is not. Scrubbing the valid axis back now
+ * shows where each aircraft WAS at that instant, which an open-ended interval
+ * could not express. A missed poll blanks the layer for ten seconds, which is
+ * the honest picture of a feed that did not answer.
+ */
+const REPORT_VALID_SECONDS = 30
+
+/**
+ * Fetches one relay path and parses the readsb / ADSBexchange v2 shape.
+ *
+ * adsb.fi and adsb.lol both speak it, as airplanes.live did, so the parser is
+ * unchanged from the direct-fetch days: `ac[]` with `hex`, `lat`, `lon`,
+ * `alt_baro`, `flight`, `t`, `seen_pos`, and a top-level `now` in milliseconds.
+ */
+export async function fetchAircraft(path: string, signal?: AbortSignal): Promise<AircraftFetch> {
+  if (ADSB_RELAY === undefined) throw new Error(NO_RELAY)
+
+  const res = await fetch(`${ADSB_RELAY}${path}`, signal ? { signal } : {})
+  if (!res.ok) {
+    // The relay reports an upstream failure as JSON with an `error`; surface
+    // that text rather than "502", which says nothing about which side failed.
+    let detail = `${res.status} ${res.statusText}`
+    try {
+      const body = (await res.json()) as { error?: unknown }
+      if (typeof body.error === 'string') detail = body.error
+    } catch {
+      // Not JSON. The status line is all there is.
+    }
+    throw new Error(`relay: ${detail}`)
+  }
 
   const body = (await res.json()) as { ac?: unknown; now?: unknown }
-  if (!Array.isArray(body.ac)) throw new Error('airplanes.live returned no ac array')
+  if (!Array.isArray(body.ac)) throw new Error('relay returned no ac array')
 
   // `now` is milliseconds on this feed.
   const nowMs = num(body.now)
@@ -103,7 +166,7 @@ export async function fetchMilitaryAircraft(
     })
   }
 
-  return { aircraft, rejected }
+  return { aircraft, rejected, upstream: res.headers.get('x-parallax-upstream') }
 }
 
 export interface AircraftAttrs {
@@ -124,14 +187,15 @@ export function buildAircraftBatches(
     (a, push) => {
       const entity = registry.idFor(`icao:${a.hex}`)
       const validFrom = toTimestamp(a.timeUnix)
+      const validTo = toTimestamp(a.timeUnix + REPORT_VALID_SECONDS)
 
       push({
         entity,
         attr: attrs.position,
         kind: Kind.Geo,
         validFrom,
-        validTo: OPEN_VALID,
-        source: SOURCES.airplanes_live!.id,
+        validTo,
+        source: SOURCES.adsb_fi!.id,
         writePayload: (v, off) => writeGeo(v, off, a.lat, a.lon),
       })
       push({
@@ -139,8 +203,8 @@ export function buildAircraftBatches(
         attr: attrs.altitude,
         kind: Kind.F64,
         validFrom,
-        validTo: OPEN_VALID,
-        source: SOURCES.airplanes_live!.id,
+        validTo,
+        source: SOURCES.adsb_fi!.id,
         writePayload: (v, off) => writeF64Bits(v, off, a.altitudeFt),
       })
 
@@ -159,8 +223,8 @@ export function buildAircraftBatches(
           attr: attrs.label,
           kind: Kind.Sym,
           validFrom,
-          validTo: OPEN_VALID,
-          source: SOURCES.airplanes_live!.id,
+          validTo,
+          source: SOURCES.adsb_fi!.id,
           writePayload: (v, off) => writeSymBits(v, off, sym),
         })
       }
@@ -168,18 +232,34 @@ export function buildAircraftBatches(
   )
 }
 
-// ── source spec ─────────────────────────────────────────────────────────────
+/** A note naming the aggregator that answered, when the relay said which. */
+function viaNote(base: string, upstream: string | null): string {
+  return upstream ? `${base} · via ${upstream}` : base
+}
 
-export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number }> = {
-  id: SOURCES.airplanes_live!.id,
-  key: 'airplanes_live',
+// ── military, global ────────────────────────────────────────────────────────
+//
+// `/mil` is one request for every aircraft the aggregator flags as military,
+// worldwide: a few hundred, small enough to ask for whole. The flag is the
+// aggregator's own (a database of known military hex ranges), which is why the
+// coverage note says "self-declared".
+
+const MIL_NOTE = 'self-declared military ADS-B only, no civil traffic'
+
+export const airplanesSpec: SourceSpec<AircraftFetch> = {
+  id: SOURCES.adsb_fi!.id,
+  key: 'adsb_mil',
   label: 'military air · adsb',
   layer: 'aviation',
-  coverageNote: 'self-declared military ADS-B only, no civil traffic',
+  coverageNote: MIL_NOTE,
   // Twenty seconds. An aircraft at 450 kn covers about 4 km in that time, so a
-  // slower cadence would draw it somewhere it demonstrably is not — and a faster
-  // one would take more from a volunteer-funded endpoint than the map can show.
-  pollSeconds: 20,
+  // slower cadence would draw it somewhere it demonstrably is not; a faster
+  // one would take more from a volunteer-run endpoint than the map can show.
+  // The relay caches for ten, so a hundred viewers cost the upstream the same
+  // as one. With no relay there is nothing to poll: the layer fails once, at
+  // boot, with the reason, rather than counting down to the same failure every
+  // twenty seconds.
+  ...(ADSB_RELAY !== undefined ? { pollSeconds: 20 } : {}),
   attributes: [
     // Precise, for the same reason a vessel position is: this locates one
     // identifiable asset, where an earthquake epicentre locates an event.
@@ -191,7 +271,7 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
     // narrowing R1 exists to refuse under a purpose that does not permit it.
     { name: 'aircraft_label', sensitivity: Sensitivity.Public, identifying: true },
   ],
-  fetch: (signal) => fetchMilitaryAircraft(AIRPLANES_MIL_URL, signal),
+  fetch: (signal) => fetchAircraft('/mil', signal),
   normalize(raw, ctx) {
     return {
       batches: buildAircraftBatches(
@@ -205,6 +285,7 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
         ctx.intern,
       ),
       count: raw.aircraft.length,
+      note: viaNote(MIL_NOTE, raw.upstream),
     }
   },
 }
@@ -213,9 +294,9 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
 //
 // The military feed above is a global list of a few hundred aircraft, which is
 // small enough to ask for in one go. Civil traffic is not: there are tens of
-// thousands airborne at any moment, and airplanes.live is volunteer-funded.
-// Asking for all of it every twenty seconds would be both useless — the map
-// cannot show it — and rude.
+// thousands airborne at any moment, and the aggregators are volunteer-run.
+// Asking for all of it every twenty seconds would be both useless, since the
+// map cannot show it, and rude.
 //
 // So this one asks about the region on screen, and only when the region is small
 // enough for the answer to mean something. Below zoom 4 the viewport is most of a
@@ -223,50 +304,51 @@ export const airplanesSpec: SourceSpec<{ aircraft: Aircraft[]; rejected: number 
 // panel rather than silently returning nothing: a layer that is empty because
 // you are zoomed out looks identical to a layer that is broken.
 //
-// It reuses SOURCES.airplanes_live: same provider, same terms, same courtesy
-// obligations. The inspector attributing both layers to airplanes.live is true.
+// It reuses SOURCES.adsb_fi: same provider, same terms, same courtesy
+// obligations. The inspector attributing both layers to adsb.fi is true.
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Below this the viewport is too large for a point query to be meaningful. */
 const CIVIL_MIN_ZOOM = 4
 
-/** airplanes.live caps a point query at 250 nm. Asking for more is an error. */
+/** The upstreams cap a point query at 250 nm. Asking for more is an error. */
 const CIVIL_MAX_RADIUS_NM = 250
+
+const CIVIL_NOTE = `only what is on screen, and only above zoom ${CIVIL_MIN_ZOOM} — pan or zoom in to load more`
 
 export async function fetchCivilAircraft(
   view: Viewport,
   signal?: AbortSignal,
-): Promise<{ aircraft: Aircraft[]; rejected: number; skipped: string | null }> {
+): Promise<AircraftFetch & { skipped: string | null }> {
+  if (ADSB_RELAY === undefined) throw new Error(NO_RELAY)
   if (view.zoom < CIVIL_MIN_ZOOM) {
-    return { aircraft: [], rejected: 0, skipped: 'zoomed out — civil traffic is viewport-scoped' }
+    return {
+      aircraft: [],
+      rejected: 0,
+      upstream: null,
+      skipped: 'zoomed out — civil traffic is viewport-scoped',
+    }
   }
   const radiusNm = Math.min(CIVIL_MAX_RADIUS_NM, Math.max(1, Math.round(view.radiusKm / 1.852)))
-  const url =
-    `https://api.airplanes.live/v2/point/` +
-    `${view.centerLat.toFixed(3)}/${view.centerLon.toFixed(3)}/${radiusNm}`
-
-  const { aircraft, rejected } = await fetchMilitaryAircraft(url, signal)
-  return { aircraft, rejected, skipped: null }
+  const path = `/point/${view.centerLat.toFixed(3)}/${view.centerLon.toFixed(3)}/${radiusNm}`
+  const got = await fetchAircraft(path, signal)
+  return { ...got, skipped: null }
 }
 
-export const civilAircraftSpec: SourceSpec<{
-  aircraft: Aircraft[]
-  rejected: number
-  skipped: string | null
-}> = {
-  id: SOURCES.airplanes_live!.id,
-  key: 'airplanes_civil',
+export const civilAircraftSpec: SourceSpec<AircraftFetch & { skipped: string | null }> = {
+  id: SOURCES.adsb_fi!.id,
+  key: 'adsb_civil',
   label: 'civil air · adsb',
   layer: 'civil',
   viewport: 'required',
-  coverageNote: `only what is on screen, and only above zoom ${CIVIL_MIN_ZOOM} — pan or zoom in to load more`,
-  pollSeconds: 20,
+  coverageNote: CIVIL_NOTE,
+  ...(ADSB_RELAY !== undefined ? { pollSeconds: 20 } : {}),
   attributes: [
     // Distinct attribute NAMES, identical SENSITIVITIES.
     //
     // The first draft reused `aircraft_position` outright, on the argument that
     // the policy engine must treat civil and military traffic identically. The
-    // classification argument is right and is kept — position is Precise here
+    // classification argument is right and is kept: position is Precise here
     // exactly as it is there, and a weaker classification for civil traffic
     // would be indefensible. But sharing the name made the two indistinguishable
     // to the engine: a layer is defined by its geometry attribute, so both
@@ -293,6 +375,7 @@ export const civilAircraftSpec: SourceSpec<{
         ctx.intern,
       ),
       count: raw.aircraft.length,
+      note: viaNote(CIVIL_NOTE, raw.upstream),
     }
   },
 }

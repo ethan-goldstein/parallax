@@ -242,6 +242,7 @@ export class Ingestor {
 
       const base = {
         key: spec.key,
+        source: spec.id,
         label: spec.label,
         layer: spec.layer,
         category,
@@ -249,12 +250,16 @@ export class Ingestor {
       }
 
       if (res.status === 'rejected') {
-        feeds.push({ ...base, count: 0, error: String(res.reason).slice(0, 60) })
+        // The message, not `String(err)`: the panel shows this text in full and
+        // an "Error: " prefix on every failed row says nothing the red colour
+        // does not.
+        const reason = res.reason instanceof Error ? res.reason.message : String(res.reason)
+        feeds.push({ ...base, count: 0, error: reason.slice(0, 160) })
         continue
       }
 
       try {
-        const { batches: b, count } = spec.normalize(res.value, {
+        const { batches: b, count, note } = spec.normalize(res.value, {
           attrs: this.attrs,
           registry: this.registry,
           intern: (text) => this.engine.intern(text),
@@ -265,11 +270,12 @@ export class Ingestor {
         }
         batches = batches.concat(b)
         if (spec.derivation) this.#lastRaw.set(spec.key, res.value)
-        feeds.push({ ...base, count })
+        feeds.push({ ...base, count, ...(note !== undefined ? { coverageNote: note } : {}) })
       } catch (err) {
         // A source that throws while building facts must not abort the cycle —
         // it is exactly as recoverable as one whose fetch failed.
-        feeds.push({ ...base, count: 0, error: `normalize: ${String(err).slice(0, 48)}` })
+        const reason = err instanceof Error ? err.message : String(err)
+        feeds.push({ ...base, count: 0, error: reason.slice(0, 160) })
       }
     }
 
@@ -330,28 +336,31 @@ export class Ingestor {
       if (raw === undefined || !spec.derivation) continue
       const category = layerByName(spec.layer)?.category ?? 'hazards'
       try {
-        const { batches: b, count } = spec.normalize(raw, {
+        const { batches: b, count, note } = spec.normalize(raw, {
           attrs: this.attrs,
           registry: this.registry,
           intern: (text) => this.engine.intern(text),
         })
         batches = batches.concat(b)
+        const coverageNote = note ?? spec.coverageNote
         feeds.push({
           key: spec.key,
+          source: spec.id,
           label: spec.label,
           layer: spec.layer,
           category,
           count,
-          ...(spec.coverageNote !== undefined ? { coverageNote: spec.coverageNote } : {}),
+          ...(coverageNote !== undefined ? { coverageNote } : {}),
         })
       } catch (err) {
         feeds.push({
           key: spec.key,
+          source: spec.id,
           label: spec.label,
           layer: spec.layer,
           category,
           count: 0,
-          error: `recompute: ${String(err).slice(0, 40)}`,
+          error: `recompute: ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
         })
       }
     }

@@ -1,0 +1,17 @@
+# ── relay/wrangler.toml ─────────────────────────────────────────────────────
+# The ADS-B CORS relay. See worker.js for why it exists and what it refuses.
+#
+#   npx wrangler login          # once, opens a browser
+#   npx wrangler deploy         # prints the *.workers.dev URL
+#
+# Then set that URL as VITE_ADSB_RELAY (web/.env for local builds, the
+# ADSB_RELAY repository variable for the Pages deploy) and rebuild.
+#
+# No bindings, no secrets, no KV. There is nothing here to leak.
+name = "parallax-adsb-relay"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[observability]
+enabled = true

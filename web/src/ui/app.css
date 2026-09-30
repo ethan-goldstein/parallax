@@ -1177,6 +1177,14 @@
 .layer-src.dead { opacity: 0.6; }
 .layer-src .bad { color: var(--deny); }
 
+/* Why a source failed, under its row. Full text: a reason cut to fit a
+   count column is not a reason. */
+.layer-why {
+  color: var(--deny);
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
 .layer-note {
   padding: 0 var(--s-3) var(--s-2) calc(var(--s-3) + var(--s-4));
   font-size: var(--fs-micro);

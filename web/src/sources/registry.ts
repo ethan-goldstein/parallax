@@ -34,7 +34,24 @@ export interface SourceMeta {
 
 export const SOURCES: Record<string, SourceMeta> = {
   // Ids are written into every fact and persisted, so they are never renumbered.
-  // 7 is the next free one.
+  // 13 is the next free one.
+
+  adsb_fi: {
+    id: 12,
+    key: 'adsb_fi',
+    name: 'adsb.fi open data, via the PARALLAX relay',
+    url: 'https://adsb.fi/',
+    // Published terms, which is why it is the primary upstream: personal,
+    // non-commercial, cite and link. The relay (relay/worker.js) falls back to
+    // adsb.lol only when adsb.fi does not answer; adsb.lol publishes no terms.
+    license: 'Personal, non-commercial use; attribution with a link required',
+    spdx: 'NOASSERTION',
+    attribution: 'Aircraft data from adsb.fi (https://adsb.fi), volunteer ADS-B receivers',
+    shareAlike: false,
+    nonCommercial: true,
+    typicalMs: 700,
+  },
+
   recon: {
     id: 11,
     key: 'recon',
@@ -158,14 +175,15 @@ export const SOURCES: Record<string, SourceMeta> = {
     typicalMs: 600,
   },
 
+  // RETIRED, id kept. airplanes.live withdrew keyless access in 2026: the API
+  // answers 403 with a request to email the project. Nothing fetches it any
+  // more, but id 2 stays reserved so no fact ever written under it can be
+  // misattributed to whatever takes the number next. See adsb_fi above.
   airplanes_live: {
     id: 2,
     key: 'airplanes_live',
-    name: 'airplanes.live',
+    name: 'airplanes.live (retired 2026)',
     url: 'https://airplanes.live/',
-    // Community feed with informal terms rather than a published SPDX license.
-    // Saying so is better than picking a plausible-looking license it does not
-    // actually carry.
     license: 'Community terms (non-commercial use, attribution requested)',
     spdx: 'NOASSERTION',
     attribution: 'Data from airplanes.live',

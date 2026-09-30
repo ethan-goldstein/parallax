@@ -2,7 +2,8 @@
 
 A bitemporal analytical engine written in C++20 and compiled to WebAssembly. It answers
 ***"what did we believe at system-time S, about valid-time T?"*** — over live open-source
-intelligence feeds, entirely in your browser. No backend, no API keys, no login.
+intelligence feeds, entirely in your browser. No API keys, no login, and no backend beyond one
+stateless CORS relay for the aircraft feed, which has its own section below.
 
 **[▶ Live demo](https://ethan-goldstein.github.io/parallax/)** — the *show me* button runs a
 scripted minute that drives the real controls.
@@ -34,7 +35,9 @@ compiled to WebAssembly**. It plans each query, shows the access path it chose a
 estimate was wrong, and **refuses questions** that narrow to a single identifiable asset — before
 reading a row, because the check runs against the plan rather than the results.
 
-No backend, no API keys, no login. Every source is keyless, CORS-open, and named with its licence.
+No API keys, no login. Every source is keyless and named with its licence. Every source but one is
+read straight from the browser; the aircraft feed goes through a relay, and the reason is written
+down rather than hidden.
 
 **Try these:**
 [the guided tour](https://ethan-goldstein.github.io/parallax/?tour=1) ·
@@ -149,8 +152,8 @@ engine/                  C++20. No emscripten, no I/O, no renderer. Bytes in, by
         └── native/        → px_cli, px_bench benchmarks and reference outputs
 ```
 
-**One codebase, two targets.** The native build is what makes the tests meaningful — 128 test cases
-and 48,000+ assertions run under AddressSanitizer and UndefinedBehaviorSanitizer on every push, which
+**One codebase, two targets.** The native build is what makes the tests meaningful — 132 test cases
+and 48,453 assertions run under AddressSanitizer and UndefinedBehaviorSanitizer on every push, which
 is not possible in a browser.
 
 That dual target has repeatedly caught bugs a single-target project would have shipped. `size_t` is
@@ -330,9 +333,9 @@ fetch time, and license.
 | [GDACS](https://www.gdacs.org/) | EC public sector info, attribution | disaster alerts — carries its own revision axis |
 | [NASA EONET](https://eonet.gsfc.nasa.gov/) | US public domain | wildfires, volcanoes, storms, ice |
 | [NOAA SWPC](https://www.swpc.noaa.gov/) | US public domain | OVATION aurora forecast — the only source above the diagonal |
-| [airplanes.live](https://airplanes.live/) | community terms, non-commercial | military ADS-B global; civil ADS-B scoped to the viewport |
+| [adsb.fi](https://adsb.fi/) | personal, non-commercial, cite and link | military ADS-B global; civil ADS-B scoped to the viewport. Through the relay, see below |
 | [NWS / NOAA](https://api.weather.gov/) | US public domain | US weather warnings — the richest revision axis here |
-| [CelesTrak](https://celestrak.org/) | free redistribution with attribution | orbital element sets, propagated in-browser by SGP4 |
+| [CelesTrak](https://celestrak.org/) | free redistribution with attribution | orbital element sets, snapshotted daily at deploy and propagated in-browser by SGP4 |
 | PARALLAX curated | CC0, authored here | major ports, terminals and maritime chokepoints |
 | [Google Public DNS](https://dns.google/) · [rdap.org](https://rdap.org/) · [RIPEstat](https://stat.ripe.net/) · [Shodan InternetDB](https://internetdb.shodan.io/) · [MITRE CVE](https://cveawg.mitre.org/) | mixed; InternetDB non-commercial with attribution | RECON — lookups a person runs by hand |
 | [OpenFreeMap](https://openfreemap.org/) | ODbL (OpenStreetMap) | vector basemap — no key, no rate limit |
@@ -340,6 +343,33 @@ fetch time, and license.
 | [Sentinel-2 cloudless](https://s2maps.eu/) | CC BY-NC-SA 4.0 | SATELLITE basemap — 10 m, EOX IT Services GmbH |
 
 The basemaps are sources like any other and go through the same licence registry.
+
+### The one relay, and the one snapshot
+
+**Aircraft.** For its first year this page read airplanes.live directly. In 2026 airplanes.live
+withdrew keyless access, and its API now answers `403` with a request to email the project. That
+left adsb.fi, adsb.lol, adsb.one and OpenSky, and not one of them sends an
+`Access-Control-Allow-Origin` header. Checked from the deployed origin rather than assumed: all
+five fail in the browser. As of this writing there is no keyless ADS-B feed a static page can read.
+
+So the aviation layers go through [`relay/`](relay/), a Cloudflare Worker of one file. It forwards
+two fixed paths to adsb.fi (adsb.lol if adsb.fi does not answer), adds the CORS header, and
+edge-caches each answer for ten seconds so a burst of visitors costs the upstream one request. It
+holds no key, stores nothing, refuses any `Origin` other than this site, and cannot be pointed at
+another host. It is a backend in the sense that a request leaves the browser and something I run
+answers it, and that is why this section exists: the opening claim was "no backend", and a claim
+worth making is worth correcting precisely when it stops being wholly true. The client falls back to
+saying so: a build without a relay URL shows the two aviation layers as failed, with the reason in
+full, rather than an empty sky.
+
+**Satellites.** The element sets used to be fetched from CelesTrak by every visitor's browser, four
+requests per page load. CelesTrak asks for no more than one fetch per group every two hours and
+blocks addresses that ignore it, and element sets change only a few times a day, so a live fetch was
+spending a one-person site's goodwill to gain nothing. The deploy now fetches the four groups once,
+embeds them as a same-origin snapshot, and re-deploys daily. Bitemporally nothing moves: the system
+time of a propagated position is the TLE epoch, read from the element set, so a snapshot taken at
+03:00 carrying an epoch of 01:00 lands on the axis at 01:00 exactly as a live fetch would. The layer
+panel names the snapshot and its time, because that is the one thing the axis cannot show.
 
 Sentinel-2 cloudless is CC BY-NC-SA, and that was initially reason enough to leave it out: share-alike
 on a basemap is worse than on a data layer, because the basemap sits under every screenshot and every
@@ -446,7 +476,7 @@ Restraint is a design requirement here, not an afterthought:
 ```bash
 ./scripts/bootstrap.sh                                    # cmake, ninja, emsdk 6.0.5
 cmake --preset native-debug && cmake --build --preset native-debug
-ctest --preset native-debug                               # 110 cases, ASan + UBSan
+ctest --preset native-debug                               # 132 cases, ASan + UBSan
 ./scripts/build-wasm.sh
 npm --prefix web install && npm --prefix web run build
 npm --prefix web run preview                              # localhost:4173/parallax/
@@ -496,9 +526,10 @@ estimator is wrong, and what I chose not to build. Those answers are in
 
 ---
 
-Built by **Ethan Goldstein** — B.S. Computer Information Systems, University of South Carolina '27.
-Active Public Trust clearance. I process government records at GovCIO, which is where the provenance
-and audit requirements in this project came from: every field in PARALLAX carries its source, fetch
+Built by **Ethan Goldstein**, B.S. Computer Information Systems, University of South Carolina '27,
+and the sole software engineer at SafeRides, a campus rideshare startup. Before that I processed confidential
+Veteran and IRS records at GovCIO under a Public Trust clearance, which is where the provenance and
+audit requirements in this project came from: every field in PARALLAX carries its source, fetch
 time, and license because that is what handling real records teaches you to expect.
 
 MIT licensed — see [LICENSE](LICENSE).
