@@ -1,5 +1,6 @@
 // ── relay/worker.js ─────────────────────────────────────────────────────────
-// A CORS relay for ADS-B, and nothing else. Cloudflare Worker, one file.
+// The public face of the ADS-B relay. Cloudflare Worker, one file plus the
+// shared upstream.js.
 //
 // ── why this exists ─────────────────────────────────────────────────────────
 //
@@ -11,22 +12,33 @@
 // Access-Control-Allow-Origin header. There is, as of this writing, no
 // keyless ADS-B feed a static page can read.
 //
-// So this is the smallest thing that restores the layer honestly: a stateless
-// pass-through that adds the CORS header the upstream does not. It holds no
-// key, stores nothing, and cannot be pointed at any other host. The README
-// says exactly this, because "no backend" was a claim worth being precise
-// about once it stopped being wholly true.
+// This is the smallest thing that restores the layer honestly: a pass-through
+// that adds the CORS header the upstream does not, holds no key, stores
+// nothing, and cannot be pointed at any other host.
+//
+// ── and why it forwards to a laptop ─────────────────────────────────────────
+//
+// The first deployment fetched the aggregators directly from here, and both
+// refused: adsb.fi 403, adsb.lol 429. Cloudflare Workers egress from shared
+// addresses that every other Worker on the platform also uses, and the
+// aggregators have had their fill of cloud traffic. A home connection is
+// served without complaint. So when MAC_RELAY_URL and RELAY_TOKEN are set,
+// the fetch is delegated to local.mjs over a Tailscale Funnel, with the
+// token so the Funnel hostname being public does not make that an open relay.
+// Without them, the Worker tries the aggregators itself and reports exactly
+// what they said.
 //
 // ── what it refuses to be ───────────────────────────────────────────────────
 //
-//   - an open proxy: only the two paths below exist, and the upstream host is
-//     fixed in this file rather than taken from the request
+//   - an open proxy: only the two paths in upstream.js exist, and every host
+//     is fixed in source rather than taken from the request
 //   - a way round the upstream's terms: adsb.fi is non-commercial with
 //     attribution, and the page renders that attribution; responses are
-//     cached for CACHE_SECONDS so N viewers cost the upstream one request
+//     edge-cached for CACHE_SECONDS so N viewers cost the upstream one request
 //   - reachable from anywhere: the Origin allowlist is the deployed site and
-//     the two local preview ports, and everything else gets 403
+//     the local preview ports, and everything else gets 403
 // ────────────────────────────────────────────────────────────────────────────
+import { fromUpstream, route } from './upstream.js'
 
 /** Where the page is served from. Anything else is refused. */
 const ALLOWED_ORIGINS = new Set([
@@ -37,38 +49,17 @@ const ALLOWED_ORIGINS = new Set([
 ])
 
 /**
- * adsb.fi first, adsb.lol second. Both serve the readsb/ADSBexchange v2 JSON
- * shape, so the client does not care which one answered. adsb.fi publishes
- * terms (personal, non-commercial, cite and link); adsb.lol publishes none.
- * A source with stated terms is preferred over one whose terms are unknown.
- */
-const UPSTREAMS = [
-  {
-    name: 'adsb.fi',
-    mil: 'https://opendata.adsb.fi/api/v2/mil',
-    point: (lat, lon, nm) => `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,
-  },
-  {
-    name: 'adsb.lol',
-    mil: 'https://api.adsb.lol/v2/mil',
-    point: (lat, lon, nm) => `https://api.adsb.lol/v2/point/${lat}/${lon}/${nm}`,
-  },
-]
-
-/**
  * How long one upstream answer is served to every viewer.
  *
  * The page polls every twenty seconds. Ten seconds here means a burst of
- * visitors costs adsb.fi at most one request per ten seconds per endpoint,
- * well inside its one-request-per-second limit, and no viewer sees a position
- * more than ten seconds older than they would have without the relay.
+ * visitors costs the upstream at most one request per ten seconds per
+ * endpoint, well inside adsb.fi's one-request-per-second limit, and no viewer
+ * sees a position more than ten seconds older than they would have without
+ * the relay.
  */
 const CACHE_SECONDS = 10
 
-/** Upstream cap. Asking for more is an error there, so it is clamped here. */
-const MAX_RADIUS_NM = 250
-
-const NUM = /^-?\d{1,3}(\.\d{1,4})?$/
+const EDGE_CACHE = { cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true } }
 
 function corsHeaders(origin) {
   return {
@@ -86,61 +77,43 @@ function json(body, status, origin, extra = {}) {
   })
 }
 
-/** Resolves a request path to the upstream URL it maps to, or null. */
-function route(pathname) {
-  if (pathname === '/mil') return { kind: 'mil' }
-
-  // /point/{lat}/{lon}/{nm}
-  const m = pathname.match(/^\/point\/([^/]+)\/([^/]+)\/(\d{1,3})$/)
-  if (!m) return null
-  const [, lat, lon, nmRaw] = m
-  if (!NUM.test(lat) || !NUM.test(lon)) return null
-  const la = Number(lat)
-  const lo = Number(lon)
-  if (la < -90 || la > 90 || lo < -180 || lo > 180) return null
-  const nm = Math.min(MAX_RADIUS_NM, Math.max(1, Number(nmRaw)))
-  return { kind: 'point', lat, lon, nm }
-}
-
-async function fromUpstream(r, ctx) {
-  let lastErr = null
-  for (const up of UPSTREAMS) {
-    const url = r.kind === 'mil' ? up.mil : up.point(r.lat, r.lon, r.nm)
-    try {
-      const res = await fetch(url, {
-        headers: {
-          accept: 'application/json',
-          // A real identity, so the upstream can see who is asking and why.
-          'user-agent': 'parallax-relay/1.0 (+https://github.com/ethan-goldstein/parallax)',
-        },
-        // Cloudflare's edge cache, keyed on the upstream URL, so a burst of
-        // viewers is one upstream fetch. cacheEverything is required because
-        // the upstream sends no cache headers of its own.
-        cf: { cacheTtl: CACHE_SECONDS, cacheEverything: true },
-      })
-      if (!res.ok) {
-        lastErr = `${up.name} ${res.status}`
-        continue
+/**
+ * Asks the residential relay, when one is configured.
+ *
+ * Returns the same shape as fromUpstream so the caller does not care which
+ * path answered. A failure here falls through to the direct attempt, which
+ * will most likely be refused too, but reporting both is more useful than
+ * reporting either alone.
+ */
+async function fromMac(r, env) {
+  const base = env.MAC_RELAY_URL?.replace(/\/+$/, '')
+  if (!base || !env.RELAY_TOKEN) return null
+  try {
+    const res = await fetch(`${base}${r.key}`, {
+      ...EDGE_CACHE,
+      headers: { 'x-relay-token': env.RELAY_TOKEN, accept: 'application/json' },
+    })
+    if (!res.ok) {
+      let detail = String(res.status)
+      try {
+        const body = await res.json()
+        if (typeof body.error === 'string') detail = `${res.status} ${body.error}`
+      } catch {
+        // Not JSON; the status is what there is.
       }
-      const text = await res.text()
-      // Parsed once, to refuse to relay anything that is not the JSON shape the
-      // client expects. A relay that forwards an HTML error page as 200 is a
-      // relay that turns one failure into a confusing second one.
-      const body = JSON.parse(text)
-      if (!Array.isArray(body.ac)) {
-        lastErr = `${up.name} returned no ac array`
-        continue
-      }
-      return { text, upstream: up.name }
-    } catch (err) {
-      lastErr = `${up.name}: ${String(err).slice(0, 80)}`
+      return { error: `home relay ${detail}` }
     }
+    const text = await res.text()
+    const body = JSON.parse(text)
+    if (!Array.isArray(body.ac)) return { error: 'home relay returned no ac array' }
+    return { text, upstream: res.headers.get('x-parallax-upstream') ?? 'home relay' }
+  } catch (err) {
+    return { error: `home relay: ${String(err).slice(0, 80)}` }
   }
-  return { error: lastErr ?? 'no upstream answered' }
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const origin = request.headers.get('origin') ?? ''
     const allowed = ALLOWED_ORIGINS.has(origin)
 
@@ -165,9 +138,15 @@ export default {
     }
 
     const r = route(new URL(request.url).pathname)
-    if (!r) return json({ error: 'unknown path; only /mil and /point/{lat}/{lon}/{nm} exist' }, 404, origin)
+    if (!r) {
+      return json({ error: 'unknown path; only /mil and /point/{lat}/{lon}/{nm} exist' }, 404, origin)
+    }
 
-    const out = await fromUpstream(r, ctx)
+    let out = await fromMac(r, env)
+    if (!out || out.error) {
+      const direct = await fromUpstream(r, EDGE_CACHE)
+      out = direct.error && out?.error ? { error: `${out.error}; direct: ${direct.error}` } : direct
+    }
     if (out.error) return json({ error: out.error }, 502, origin)
 
     return new Response(out.text, {

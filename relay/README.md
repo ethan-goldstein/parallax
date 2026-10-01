@@ -1,41 +1,68 @@
 # The ADS-B relay
 
-One Cloudflare Worker, one file, no state. It adds the `Access-Control-Allow-Origin` header that
-no community ADS-B aggregator sends, and does nothing else.
+Two small pieces, no state, one secret between them. Together they add the
+`Access-Control-Allow-Origin` header that no community ADS-B aggregator sends, from an address the
+aggregators are willing to serve.
 
 ## Why it exists
 
 Until 2026 the aviation layers read [airplanes.live](https://airplanes.live/) directly from the
 browser. That endpoint now answers `403` with a request to email the project, and the remaining
 aggregators (adsb.fi, adsb.lol, adsb.one, OpenSky) all serve JSON without CORS headers. A static
-page cannot read any of them. The relay is the smallest thing that restores the layer without
-pretending the situation is other than it is.
+page cannot read any of them.
+
+## Why it is two pieces
+
+The first version was the Worker alone, fetching the aggregators from Cloudflare. Both refused:
+adsb.fi `403`, adsb.lol `429`. Workers egress from shared addresses that every other Worker also
+uses, and the aggregators have had enough cloud traffic. A home connection is served without
+complaint. So:
+
+- [`worker.js`](worker.js), **the public face.** Cloudflare Worker. Holds the `Origin` allowlist,
+  edge-caches every answer for ten seconds, and forwards the two permitted paths to the home relay
+  with a shared token. Falls back to fetching the aggregators directly and reports exactly what
+  they said if the home relay is down.
+- [`local.mjs`](local.mjs), **the residential half.** A Node process bound to loopback on a machine
+  with a home address, reached through a Tailscale Funnel on port 8443, that refuses any request
+  without the token and does the single upstream fetch. Runs under launchd.
+- [`upstream.js`](upstream.js), shared by both, so they cannot disagree about which hosts exist.
 
 ## What it is not
 
 - **Not an open proxy.** Two paths exist, `/mil` and `/point/{lat}/{lon}/{nm}`, and the upstream
-  hosts are fixed in the source. A request with an `Origin` outside the allowlist gets `403`.
-- **Not a key holder.** The upstreams are keyless. There is no secret in the Worker and nothing in
-  its config.
-- **Not a load multiplier.** Responses are edge-cached for ten seconds, so a burst of visitors is
-  one upstream request per endpoint per ten seconds, well inside adsb.fi's one-per-second limit.
+  hosts are constants in `upstream.js`. The Worker refuses any `Origin` outside the allowlist; the
+  home relay refuses any request without the token.
+- **Not a key holder for anything upstream.** The aggregators are keyless. The only secret is the
+  token the two halves share, set with `wrangler secret put` and read from a mode-600 file.
+- **Not a load multiplier.** The Worker caches at the edge and the home relay caches in memory, both
+  for ten seconds, so a burst of visitors is one upstream request per endpoint per ten seconds,
+  well inside adsb.fi's one-per-second limit.
 
 ## Deploy
+
+Home relay, on the machine with the residential address:
+
+```bash
+mkdir -p ~/.config/parallax-relay && chmod 700 ~/.config/parallax-relay
+openssl rand -hex 24 > ~/.config/parallax-relay/token && chmod 600 ~/.config/parallax-relay/token
+# launchd plist: node relay/local.mjs with PORT=8791 (see the one in ~/Library/LaunchAgents)
+tailscale funnel --bg --https=8443 8791      # one-time: enable Funnel in the Tailscale admin
+```
+
+Worker:
 
 ```bash
 cd relay
 npx wrangler login
-npx wrangler deploy
+npx wrangler secret put RELAY_TOKEN < ~/.config/parallax-relay/token
+npx wrangler deploy                           # prints the *.workers.dev URL
 ```
 
-`deploy` prints a `https://parallax-adsb-relay.<account>.workers.dev` URL. Give it to the build:
+Then give the URL to the build:
 
 ```bash
-# local builds
-echo 'VITE_ADSB_RELAY=https://parallax-adsb-relay.<account>.workers.dev' > web/.env
-
-# the GitHub Pages deploy
-gh variable set ADSB_RELAY --body 'https://parallax-adsb-relay.<account>.workers.dev'
+echo 'VITE_ADSB_RELAY=https://parallax-adsb-relay.<account>.workers.dev' > web/.env   # local
+gh variable set ADSB_RELAY --body 'https://parallax-adsb-relay.<account>.workers.dev'  # Pages
 gh workflow run deploy.yml
 ```
 

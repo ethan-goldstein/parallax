@@ -352,10 +352,14 @@ left adsb.fi, adsb.lol, adsb.one and OpenSky, and not one of them sends an
 `Access-Control-Allow-Origin` header. Checked from the deployed origin rather than assumed: all
 five fail in the browser. As of this writing there is no keyless ADS-B feed a static page can read.
 
-So the aviation layers go through [`relay/`](relay/), a Cloudflare Worker of one file. It forwards
-two fixed paths to adsb.fi (adsb.lol if adsb.fi does not answer), adds the CORS header, and
-edge-caches each answer for ten seconds so a burst of visitors costs the upstream one request. It
-holds no key, stores nothing, refuses any `Origin` other than this site, and cannot be pointed at
+So the aviation layers go through [`relay/`](relay/): a Cloudflare Worker that holds the `Origin`
+allowlist and edge-caches each answer for ten seconds, forwarding two fixed paths to a small Node
+process on a machine with a home address, which does the one upstream fetch from adsb.fi (adsb.lol
+if adsb.fi does not answer). Two pieces rather than one because the first deployment, the Worker
+fetching the aggregators itself, was refused by both: adsb.fi `403`, adsb.lol `429`. Cloudflare
+Workers egress from addresses shared with every other Worker, and the aggregators have had their
+fill of cloud traffic; a residential connection is served without complaint. The relay holds no
+upstream key, stores nothing, refuses any `Origin` other than this site, and cannot be pointed at
 another host. It is a backend in the sense that a request leaves the browser and something I run
 answers it, and that is why this section exists: the opening claim was "no backend", and a claim
 worth making is worth correcting precisely when it stops being wholly true. The client falls back to

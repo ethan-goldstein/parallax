@@ -78,6 +78,26 @@ The one thing a viewer cannot read off the axis is which snapshot the elements c
 layer panel says so, with the snapshot's time in UTC rather than a relative age that is only true
 at the instant it was rendered.
 
+## What the first deployment taught
+
+The Worker was meant to be the whole relay. Deployed, it was refused by both aggregators: adsb.fi
+`403`, adsb.lol `429`, on the very first request, from an address that had never asked before.
+Cloudflare Workers fetch from egress addresses shared with every other Worker on the platform, and
+the aggregators rate-limit and block by address. A residential connection, tested the same minute,
+was served by both without complaint.
+
+So the relay became two pieces. The Worker keeps everything that should face the public: the
+`Origin` allowlist, the edge cache, the stable URL. The upstream fetch moved to
+[`relay/local.mjs`](../../relay/local.mjs), a Node process bound to loopback on a machine with a
+home address, reached through a Tailscale Funnel on one port and refusing any request without a
+shared token. [`relay/upstream.js`](../../relay/upstream.js) is the one place the upstream hosts
+and the path grammar live, imported by both, so the two halves cannot drift.
+
+The cost is a machine that has to stay up. It already does: it runs other services under launchd
+with sleep disabled, and the Worker reports a home-relay outage as exactly that rather than as an
+empty layer. The alternative, spoofing a browser `User-Agent` from the Worker to get past adsb.fi's
+block, was not considered: a `403` from an operator is an answer, not an obstacle.
+
 ## What it cost
 
 - **The opening claim is no longer clean.** "No backend" is now "no backend beyond one stateless

@@ -23,6 +23,9 @@ data/snapshots/*.raw.json
 # copy would go stale in the repo while looking current on the site.
 web/public/tle/
 
+# wrangler's local state for the relay Worker.
+relay/.wrangler/
+
 # Tooling
 compile_commands.json
 .cache/

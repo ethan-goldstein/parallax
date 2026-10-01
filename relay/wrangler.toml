@@ -1,17 +1,30 @@
 # ── relay/wrangler.toml ─────────────────────────────────────────────────────
-# The ADS-B CORS relay. See worker.js for why it exists and what it refuses.
+# The ADS-B relay's public face. See worker.js for why it exists and what it
+# refuses, and local.mjs for the half that runs on a residential address.
 #
-#   npx wrangler login          # once, opens a browser
-#   npx wrangler deploy         # prints the *.workers.dev URL
+#   npx wrangler login                        # once, opens a browser
+#   npx wrangler secret put RELAY_TOKEN       # paste ~/.config/parallax-relay/token
+#   npx wrangler deploy                       # prints the *.workers.dev URL
 #
 # Then set that URL as VITE_ADSB_RELAY (web/.env for local builds, the
 # ADSB_RELAY repository variable for the Pages deploy) and rebuild.
 #
-# No bindings, no secrets, no KV. There is nothing here to leak.
+# The only secret is RELAY_TOKEN, which authenticates this Worker to the
+# residential relay. It is set with `wrangler secret put`, never written here.
 name = "parallax-adsb-relay"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 workers_dev = true
+
+[vars]
+# The Tailscale Funnel hostname of the machine running local.mjs. Port 8443
+# and not 443 or 10000: 443 is a tailnet-only Serve for something else on
+# that machine, and Workers can only fetch a fixed list of ports, which has
+# 8443 in it and not 10000. Funnel is enabled per port, so this exposes
+# exactly one. Remove
+# this (and the secret) to have the Worker fetch the aggregators directly,
+# which they refuse from Cloudflare addresses as of 2026-10.
+MAC_RELAY_URL = "https://macbook-air.tail2666c3.ts.net:8443"
 
 [observability]
 enabled = true
